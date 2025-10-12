@@ -1,0 +1,59 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <PublishAot>true</PublishAot>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <RootNamespace>LinnstrumentKeyboard</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="managed-midi" Version="1.10.1"/>
+        <PackageReference Include="SharpHook" Version="7.0.2"/>
+    </ItemGroup>
+
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+        <!-- Ubuntu/Debian x86_64 -->
+        <Content Include="/usr/lib/x86_64-linux-gnu/libasound.so.2"
+                 Condition="Exists('/usr/lib/x86_64-linux-gnu/libasound.so.2')">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>runtimes/linux-x64/native/libasound.so</Link>
+            <Visible>false</Visible>
+        </Content>
+
+        <!-- openSUSE/Fedora/RHEL x86_64 -->
+        <Content Include="/usr/lib64/libasound.so.2"
+                 Condition="Exists('/usr/lib64/libasound.so.2') AND !Exists('/usr/lib/x86_64-linux-gnu/libasound.so.2')">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>runtimes/linux-x64/native/libasound.so</Link>
+            <Visible>false</Visible>
+        </Content>
+
+        <!-- Generic /usr/lib fallback -->
+        <Content Include="/usr/lib/libasound.so.2"
+                 Condition="Exists('/usr/lib/libasound.so.2') AND !Exists('/usr/lib/x86_64-linux-gnu/libasound.so.2') AND !Exists('/usr/lib64/libasound.so.2')">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>runtimes/linux-x64/native/libasound.so</Link>
+            <Visible>false</Visible>
+        </Content>
+
+        <!-- /lib fallback -->
+        <Content Include="/lib/x86_64-linux-gnu/libasound.so.2"
+                 Condition="Exists('/lib/x86_64-linux-gnu/libasound.so.2') AND !Exists('/usr/lib/x86_64-linux-gnu/libasound.so.2') AND !Exists('/usr/lib64/libasound.so.2') AND !Exists('/usr/lib/libasound.so.2')">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>runtimes/linux-x64/native/libasound.so</Link>
+            <Visible>false</Visible>
+        </Content>
+
+        <!-- ARM64 Ubuntu/Debian -->
+        <Content Include="/usr/lib/aarch64-linux-gnu/libasound.so.2"
+                 Condition="Exists('/usr/lib/aarch64-linux-gnu/libasound.so.2')">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>runtimes/linux-arm64/native/libasound.so</Link>
+            <Visible>false</Visible>
+        </Content>
+    </ItemGroup>
+</Project>
