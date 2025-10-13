@@ -1,4 +1,4 @@
-﻿namespace LinnstrumentKeyboard;
+﻿namespace Midi.Net.MidiUtilityStructs.Enums;
 
 public enum NoteId : byte
 {

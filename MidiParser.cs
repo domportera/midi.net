@@ -1,12 +1,14 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using Midi.Net.MidiUtilityStructs;
 
-namespace LinnstrumentKeyboard;
+namespace Midi.Net;
 
 public static class MidiParser
 {
     public static ushort Value14Bit(byte msb, byte lsb) => (ushort)((msb << 7) | lsb);
 
-    public static bool TryInterpret(ref MidiStatus? latest, ReadOnlySpan<byte> bytes, [NotNullWhen(true)] out MidiEvent? midi)
+    public static bool TryInterpret(ref MidiStatus? latest, ReadOnlySpan<byte> bytes,
+        [NotNullWhen(true)] out MidiEvent? midi)
     {
         if (bytes.Length is not 2 && bytes.Length is not 3)
             throw new ArgumentException("MIDI message must 2 or 3 bytes long.", nameof(bytes));
@@ -15,12 +17,12 @@ public static class MidiParser
         if (evt.IsRealTime)
         {
             midi = null;
-            #if DEBUG
+#if DEBUG
             Console.WriteLine("Ignoring real-time message - not yet supported");
-            #endif
+#endif
             return false;
         }
-        
+
         if (evt.HasStatus)
         {
             var status = evt.Status;

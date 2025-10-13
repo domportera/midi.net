@@ -1,7 +1,8 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Midi.Net.MidiUtilityStructs.Enums;
 
-namespace LinnstrumentKeyboard;
+namespace Midi.Net.MidiUtilityStructs;
 
 [StructLayout(LayoutKind.Sequential, Size = 1, Pack = 1)]
 public readonly record struct MidiStatus

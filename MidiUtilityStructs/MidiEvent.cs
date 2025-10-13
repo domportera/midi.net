@@ -1,6 +1,7 @@
 ﻿using System.Runtime.InteropServices;
+using Midi.Net.MidiUtilityStructs.Enums;
 
-namespace LinnstrumentKeyboard;
+namespace Midi.Net.MidiUtilityStructs;
 
 [StructLayout(LayoutKind.Sequential, Size = 4, Pack = 1)]
 // todo - change size
@@ -26,7 +27,7 @@ public readonly record struct MidiEvent
         buffer[0] = (byte)Status;
         if (Data.Count == 0)
             return 1;
-        
+
         buffer[1] = Data.B1;
         if (Data.Count == 1)
             return 2;

@@ -7,12 +7,16 @@
         <PublishAot>true</PublishAot>
         <InvariantGlobalization>true</InvariantGlobalization>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <RootNamespace>LinnstrumentKeyboard</RootNamespace>
+        <RootNamespace>Midi.Net</RootNamespace>
+        <PublishAot>true</PublishAot>
+
+        <!-- disable transitive references by default -->
+        <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="managed-midi" Version="1.10.1"/>
-        <PackageReference Include="SharpHook" Version="7.0.2"/>
+        <PackageReference Include="managed-midi" Version="1.10.1" />
+        <PackageReference Include="SharpHook" Version="7.0.2" />
     </ItemGroup>
 
     <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">

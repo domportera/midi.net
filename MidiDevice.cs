@@ -1,42 +1,19 @@
 ﻿using Commons.Music.Midi;
+using Midi.Net.MidiUtilityStructs;
+using Midi.Net.MidiUtilityStructs.Enums;
+using MidiEvent = Midi.Net.MidiUtilityStructs.MidiEvent;
 
-namespace LinnstrumentKeyboard;
+namespace Midi.Net;
 
-public class MidiDevice : IMidiInput, IMidiOutput
+public partial class MidiDevice : IMidiInput, IMidiOutput
 {
-    public readonly IMidiInput Input;
-    public readonly IMidiOutput Output;
-
-    private MidiStatus? _inputStatus;
-    private byte? _nrpnLsb, _nrpnMsb;
-
-    public MidiDevice(IMidiInput input, IMidiOutput output)
-    {
-        Input = input;
-        Output = output;
-
-        input.MessageReceived += OnMessageReceived;
-    }
-
-    private void OnMessageReceived(object? sender, MidiReceivedEventArgs e)
-    {
-        var dataSpan = new ReadOnlySpan<byte>(e.Data, e.Start, e.Length);
-
-        if (!MidiParser.TryInterpret(ref _inputStatus, dataSpan, out var msg))
-        {
-            Console.WriteLine("Failed to parse MIDI message");
-            return;
-        }
-
-        try
-        {
-            MidiReceived?.Invoke(this, msg.Value);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine(ex);
-        }
-    }
+    public string Name => Input.Details.Name;
+    public string Manufacturer => Input.Details.Manufacturer;
+    public string Version => Input.Details.Version;
+    public string Id => Input.Details.Id;
+    public bool IsDisposed { get; private set; }
+    public event EventHandler<MidiEvent>? MidiReceived;
+    public ConnectionState ConnectionState => (ConnectionState)Input.Connection;
 
     public async Task CloseAsync()
     {
@@ -51,30 +28,80 @@ public class MidiDevice : IMidiInput, IMidiOutput
         }
     }
 
-    public IMidiPortDetails Details => Input.Details;
-
-    public MidiPortConnectionState Connection => Input.Connection;
-
     public void Dispose()
     {
-        try
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    public void CommitNrpn(int nrpn, int value, int channel)
+    {
+        var nrpnLsb = (byte)(nrpn & 0x7F);
+        var nrpnMsb = (byte)((nrpn >> 7) & 0x7F);
+
+        var valueLsb = (byte)(value & 0x7F);
+        var valueMsb = (byte)((value >> 7) & 0x7F);
+        CommitCC(channel,
+            new ControlChangeMessage(ControlChange.NrpnMsb, nrpnMsb),
+            new ControlChangeMessage(ControlChange.NrpnLsb, nrpnLsb),
+            new ControlChangeMessage(ControlChange.DataEntryMsb, valueMsb),
+            new ControlChangeMessage(ControlChange.DataEntryLsb, valueLsb)
+        );
+        
+    }
+
+    private void AppendMidiEvent(in MidiEvent evt) => _bufferPos += evt.CopyTo(_midiSendBuffer.AsSpan(_bufferPos..));
+
+    private MidiStatus? _inputStatus;
+    private int _bufferPos;
+
+    internal IMidiInput Input
+    {
+        get => _input!;
+        init
         {
-            Input.Dispose();
-            Output.Dispose();
-        }
-        catch (Exception e)
-        {
-            Console.Error.WriteLine(e);
+            _input = value;
+            _input.MessageReceived += OnMessageReceived;
         }
     }
-    
-    public void Send(byte[] mevent, int offset, int length, long timestamp) => Output.Send(mevent, offset, length, timestamp);
 
-    public event EventHandler<MidiEvent>? MidiReceived; 
+    private IMidiInput? _input;
+    private IMidiOutput? _output;
 
-    public event EventHandler<MidiReceivedEventArgs>? MessageReceived
+    internal IMidiOutput Output
     {
-        add => Input.MessageReceived += value;
-        remove => Input.MessageReceived -= value;
+        get => _output!;
+        init => _output = value;
+    }
+
+    private readonly Lock _bufferLock = new();
+    private readonly byte[] _midiSendBuffer = new byte[4096];
+
+    public void CommitCC(int channel, params Span<ControlChangeMessage> messages)
+    {
+        var channelByte = (byte)(channel & 0x0F);
+        lock (_bufferLock)
+        {
+            foreach (var msg in messages)
+            {
+                var midiEvt = new MidiEvent(new MidiStatus(StatusType.CC, channelByte), msg);
+                AppendMidiEvent(midiEvt);
+            }
+        }
+    }
+
+    public void PushMidi()
+    {
+        lock (_bufferLock)
+        {
+            var len = _bufferPos;
+            if (len == 0)
+            {
+                return;
+            }
+            
+            _bufferPos = 0;
+            Output.Send(_midiSendBuffer, 0, len, 0);
+        }
     }
 }
