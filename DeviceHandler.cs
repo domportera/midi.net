@@ -10,6 +10,19 @@ public static class DeviceHandler
 
     public static async Task<T?> TryOpen<T>(string deviceSearchTerm) where T : MidiDevice, new()
     {
+        var (success, midiInput, midiOutput) = await TryOpen(deviceSearchTerm);
+        if (!success)
+            return null;
+        
+        return new T
+        {
+            Input = midiInput!,
+            Output = midiOutput!
+        };
+    }
+
+    internal static async Task<(bool, IMidiInput? midiInput, IMidiOutput? midiOutput)> TryOpen(string deviceSearchTerm)
+    {
         IMidiInput? midiInput = null;
         IMidiOutput? midiOutput = null;
         foreach (var input in MidiAccess.Inputs)
@@ -27,7 +40,9 @@ public static class DeviceHandler
         if (midiInput == null)
         {
             await Console.Error.WriteLineAsync("Failed to open MIDI device input");
-            return null;
+            midiOutput?.Dispose();
+            midiOutput = null;
+            return (false, midiInput, midiOutput);
         }
 
         foreach (var output in MidiAccess.Outputs)
@@ -46,13 +61,10 @@ public static class DeviceHandler
         {
             await Console.Error.WriteLineAsync("Failed to open MIDI device output");
             midiInput.Dispose();
-            return null;
+            midiInput = null;
+            return (false, midiInput, midiOutput);
         }
 
-        return new T
-        {
-            Input = midiInput,
-            Output = midiOutput
-        };
+        return (true, midiInput, midiOutput);
     }
 }

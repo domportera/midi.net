@@ -2,6 +2,7 @@
 using Commons.Music.Midi;
 using Midi.Net.MidiUtilityStructs;
 using Midi.Net.MidiUtilityStructs.Enums;
+using SharpHook.Logging;
 using MidiEvent = Midi.Net.MidiUtilityStructs.MidiEvent;
 
 namespace Midi.Net;
@@ -15,7 +16,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
     public bool IsDisposed { get; private set; }
     public event EventHandler<MidiEvent>? MidiReceived;
     public ConnectionState ConnectionState => (ConnectionState)Input.Connection;
-    private readonly AutoResetEvent _midiSendEvent = new (false);
+    private readonly AutoResetEvent _midiSendEvent = new(false);
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 
     protected MidiDevice()
@@ -25,7 +26,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             AutoResetEvent = _midiSendEvent,
             CancellationToken = _cancellationTokenSource.Token
         };
-        
+
         var thread = new Thread(MidiSendThread)
         {
             IsBackground = true,
@@ -33,17 +34,23 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
         };
         thread.Start(args);
     }
-    
+
     private class SendThreadArgs
     {
         public required AutoResetEvent AutoResetEvent { get; init; }
         public required CancellationToken CancellationToken { get; init; }
     }
 
-    private async void MidiSendThread(object? argsObj)
+    private void MidiSendThread(object? argsObj)
     {
-        if(argsObj is not SendThreadArgs args)
-            throw new ArgumentException("Invalid argument for MIDI send thread");
+        if (argsObj is not SendThreadArgs args)
+        {
+            const string msg = "Invalid argument for MIDI send thread: expected SendThreadArgs, got ";
+            var errorMsg = argsObj == null ? msg + "null" : msg + argsObj.GetType().FullName;
+            Console.Error.WriteLine(errorMsg);
+            throw new ArgumentException(errorMsg);
+        }
+
         var token = args.CancellationToken;
         var autoResetEvent = args.AutoResetEvent;
         var waitHandles = new[] { autoResetEvent, token.WaitHandle };
@@ -52,7 +59,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             var signaledIndex = WaitHandle.WaitAny(waitHandles);
             if (signaledIndex == 1) // cancellation requested
                 break;
-            
+
             Buffer buffer;
             lock (_sendQueueLock)
             {
@@ -68,7 +75,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             {
                 try
                 {
-                    await Console.Error.WriteLineAsync(ex.ToString());
+                    Console.Error.WriteLine(ex.ToString());
                 }
                 catch
                 {
@@ -121,55 +128,6 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
         }
     }
 
-    private MidiStatus? _inputStatus;
-
-    internal IMidiInput Input
-    {
-        get => _input!;
-        init
-        {
-            _input = value;
-            _input.MessageReceived += OnMessageReceived;
-        }
-    }
-
-    private IMidiInput? _input;
-    private IMidiOutput? _output;
-
-    internal IMidiOutput Output
-    {
-        get => _output!;
-        init => _output = value;
-    }
-
-    private readonly Lock _bufferLock = new();
-    private readonly Lock _bufferPoolLock = new();
-    private Buffer _midiSendBuffer;
-    private readonly Stack<Buffer> _midiBufferPool = new();
-    private const int BufferSize = 4096;
-
-    private struct Buffer : IEquatable<Buffer>
-    {
-        public required byte[] Data { get; init; }
-        public int Position;
-        
-        // equality ops
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool operator ==(Buffer left, Buffer right) => ReferenceEquals(left.Data, right.Data);
-        
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool operator !=(Buffer left, Buffer right) => !ReferenceEquals(left.Data, right.Data);
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool Equals(Buffer other) => ReferenceEquals(Data, other.Data);
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public override bool Equals(object? obj) => obj is Buffer other && ReferenceEquals(Data, other.Data);
-        
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public override int GetHashCode() => Data.GetHashCode();
-    }
-
     public void CommitCC(int channel, params Span<ControlChangeMessage> messages)
     {
         var channelByte = (byte)(channel & 0x0F);
@@ -195,7 +153,8 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
         Buffer buffer;
         lock (_bufferPoolLock)
         {
-            _midiBufferPool.TryPop(out buffer);;
+            _midiBufferPool.TryPop(out buffer);
+            ;
         }
 
         if (buffer == default)
@@ -206,7 +165,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
                 Position = 0
             };
         }
-        
+
         _midiSendBuffer = buffer;
         return ref _midiSendBuffer;
     }
@@ -219,10 +178,10 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             buffer = _midiSendBuffer;
             _midiSendBuffer = default; // consume the buffer
         }
-        
-        if(buffer == default)
+
+        if (buffer == default)
             return; // nothing to send
-        
+
         if (buffer.Position == 0)
         {
             ReturnBufferToPool(ref buffer);
@@ -236,7 +195,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
 
         _midiSendEvent.Set();
     }
-    
+
     private void ReturnBufferToPool(ref Buffer buff)
     {
         lock (_bufferPoolLock)
@@ -245,7 +204,57 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             _midiBufferPool.Push(buff); // return to pool
         }
     }
+
+
+    internal IMidiInput Input
+    {
+        get => _input!;
+        init
+        {
+            _input = value;
+            _input.MessageReceived += OnMessageReceived;
+        }
+    }
+
+
+    internal IMidiOutput Output
+    {
+        get => _output!;
+        init => _output = value;
+    }
     
+
+    private MidiStatus? _inputStatus;
+    private readonly IMidiInput? _input;
+    private readonly IMidiOutput? _output;
+
+    private readonly Lock _bufferLock = new();
+    private readonly Lock _bufferPoolLock = new();
+    private Buffer _midiSendBuffer;
+    private readonly Stack<Buffer> _midiBufferPool = new();
+    private const int BufferSize = 4096;
     private readonly Lock _sendQueueLock = new();
     private readonly Queue<Buffer> _sendQueue = new();
+
+    private struct Buffer : IEquatable<Buffer>
+    {
+        public required byte[] Data { get; init; }
+        public int Position;
+
+        // equality ops
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Buffer left, Buffer right) => ReferenceEquals(left.Data, right.Data);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Buffer left, Buffer right) => !ReferenceEquals(left.Data, right.Data);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool Equals(Buffer other) => ReferenceEquals(Data, other.Data);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public override bool Equals(object? obj) => obj is Buffer other && ReferenceEquals(Data, other.Data);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public override int GetHashCode() => Data.GetHashCode();
+    }
 }
