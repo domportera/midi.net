@@ -11,7 +11,7 @@ public partial class MidiDevice
 
         if (!MidiParser.TryInterpret(ref _inputStatus, dataSpan, out var msg))
         {
-            Console.WriteLine("Failed to parse MIDI message");
+            _ = Console.Error.WriteLineAsync("Failed to parse MIDI message");
             return;
         }
 
@@ -21,7 +21,7 @@ public partial class MidiDevice
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(ex);
+            _ = Console.Error.WriteLineAsync(ex.ToString());
         }
     }
 
@@ -41,37 +41,45 @@ public partial class MidiDevice
 
     #endregion
 
-    private void Dispose(bool disposing)
+    private async Task Dispose(bool disposing)
     {
+        if (disposing)
+        {
+            IsDisposed = true;
+        }
+        
+        await _cancellationTokenSource.CancelAsync();
+        _midiSendEvent.Dispose();
+        
         try
         {
             Input.MessageReceived -= OnMessageReceived;
 
             if (OperatingSystem.IsWindows())
             {
+                await Input.CloseAsync();
+                await Output.CloseAsync();
                 Input.Dispose();
                 Output.Dispose();
             }
             else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             {
                 // On Unix-based systems, only dispose input
+                await Input.CloseAsync();
                 Input.Dispose();
             }
             else
             {
                 // For unsupported platforms, dispose both to be safe
-                Output.Dispose();
+                await Input.CloseAsync();
+                await Output.CloseAsync();
                 Input.Dispose();
+                Output.Dispose();
             }
         }
         catch (Exception e)
         {
-            Console.Error.WriteLine($"Error during device disposal: {e.Message}");
-        }
-
-        if (disposing)
-        {
-            IsDisposed = true;
+            await Console.Error.WriteLineAsync($"Error during device disposal: {e.Message}");
         }
     }
 

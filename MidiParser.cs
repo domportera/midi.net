@@ -18,7 +18,7 @@ public static class MidiParser
         {
             midi = null;
 #if DEBUG
-            Console.WriteLine("Ignoring real-time message - not yet supported");
+            _ = Console.Out.WriteLineAsync("Ignoring real-time message - not yet supported");
 #endif
             return false;
         }
