@@ -66,7 +66,14 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             }
             catch (Exception ex)
             {
-                _ = Console.Error.WriteLineAsync(ex.ToString());
+                try
+                {
+                    await Console.Error.WriteLineAsync(ex.ToString());
+                }
+                catch
+                {
+                    // ignore
+                }
             }
 
             ReturnBufferToPool(ref buffer);
@@ -75,9 +82,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
 
     public async Task CloseAsync()
     {
-        if(IsDisposed)
-            throw new ObjectDisposedException(nameof(MidiDevice));
-        
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
         await Dispose(true);
     }
 

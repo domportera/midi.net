@@ -83,8 +83,8 @@ public partial class MidiDevice
         }
     }
 
-    ~MidiDevice()
+     ~MidiDevice()
     {
-        Dispose(false);
+        _ = Dispose(false);
     }
 }
