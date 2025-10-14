@@ -13,7 +13,7 @@ public static class DeviceHandler
         var (success, midiInput, midiOutput) = await TryOpen(deviceSearchTerm);
         if (!success)
             return null;
-        
+
         return new T
         {
             Input = midiInput!,

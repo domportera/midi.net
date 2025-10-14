@@ -4,7 +4,6 @@ namespace Midi.Net;
 
 public partial class MidiDevice
 {
-
     private void OnMessageReceived(object? sender, MidiReceivedEventArgs e)
     {
         var dataSpan = new ReadOnlySpan<byte>(e.Data, e.Start, e.Length);
@@ -47,10 +46,10 @@ public partial class MidiDevice
         {
             IsDisposed = true;
         }
-        
+
         await _cancellationTokenSource.CancelAsync();
         _midiSendEvent.Dispose();
-        
+
         try
         {
             Input.MessageReceived -= OnMessageReceived;
@@ -83,7 +82,7 @@ public partial class MidiDevice
         }
     }
 
-     ~MidiDevice()
+    ~MidiDevice()
     {
         _ = Dispose(false);
     }

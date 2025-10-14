@@ -222,7 +222,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
         get => _output!;
         init => _output = value;
     }
-    
+
 
     private MidiStatus? _inputStatus;
     private readonly IMidiInput? _input;
