@@ -32,7 +32,27 @@ public static class DeviceHandler
 
             if (input.Name.ToLowerInvariant().Contains(deviceSearchTerm))
             {
-                midiInput = await MidiAccess.OpenInputAsync(input.Id);
+                bool success = false;
+                int tryCount = 0;
+                while (!success)
+                {
+                    try
+                    {
+                        ++tryCount;
+                        if (tryCount > 5)
+                        {
+                            return (false, null, null);
+                        }
+                        midiInput = await MidiAccess.OpenInputAsync(input.Id);
+                        success = true;
+                    }
+                    catch (Exception e)
+                    {
+                        await Console.Error.WriteLineAsync($"Failed to open MIDI device input, retrying: {e.Message}\n{e.StackTrace}");
+                        await Task.Delay(1000);
+                    }
+                }
+
                 break;
             }
         }

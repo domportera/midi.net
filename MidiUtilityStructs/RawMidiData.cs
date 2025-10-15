@@ -5,13 +5,13 @@ namespace Midi.Net.MidiUtilityStructs;
 [StructLayout(LayoutKind.Sequential, Size = 3, Pack = 1)]
 public readonly record struct RawMidiData
 {
-    public readonly MidiByte B1;
-    public readonly MidiByte B2;
+    public readonly byte B1;
+    public readonly byte B2;
     public readonly byte Count;
 
     // todo: handle Exclusive messages (p10 of the midi spec pdf, technically p5 per page numbers on the doc)
 
-    public bool IsRealTime => Count > 0 && B1.IsStatusByte && (Count == 1 || B2.IsStatusByte);
+    public bool IsRealTime => Count > 0 && ((MidiByte)B1).IsStatusByte && (Count == 1 || ((MidiByte)B2).IsStatusByte);
 
     public RawMidiData(ReadOnlySpan<byte> bytes)
     {
