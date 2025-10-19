@@ -2,7 +2,6 @@
 using Commons.Music.Midi;
 using Midi.Net.MidiUtilityStructs;
 using Midi.Net.MidiUtilityStructs.Enums;
-using SharpHook.Logging;
 using MidiEvent = Midi.Net.MidiUtilityStructs.MidiEvent;
 
 namespace Midi.Net;
@@ -60,30 +59,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             if (signaledIndex == 1) // cancellation requested
                 break;
 
-            Buffer buffer;
-            lock (_sendQueueLock)
-            {
-                if (!_sendQueue.TryDequeue(out buffer))
-                    continue;
-            }
-
-            try
-            {
-                Output.Send(buffer.Data, 0, buffer.Position, 0);
-            }
-            catch (Exception ex)
-            {
-                try
-                {
-                    Console.Error.WriteLine(ex.ToString());
-                }
-                catch
-                {
-                    // ignore
-                }
-            }
-
-            ReturnBufferToPool(ref buffer);
+           PushMidiImmediately();
         }
     }
 
@@ -112,6 +88,43 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             new ControlChangeMessage(ControlChange.DataEntryMsb, valueMsb),
             new ControlChangeMessage(ControlChange.DataEntryLsb, valueLsb)
         );
+    }
+
+    public void PushMidiImmediately()
+    {
+        Buffer buffer;
+        lock (_sendQueueLock)
+        {
+            if (!_sendQueue.TryDequeue(out buffer))
+                return;
+        }
+            
+        try
+        {
+            Output.Send(buffer.Data, 0, buffer.Position, 0);
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                Console.Error.WriteLine(ex.ToString());
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        ReturnBufferToPool(ref buffer);
+    }
+
+    protected void AppendMidiEvent(in MidiEvent evt)
+    {
+        lock (_bufferLock)
+        {
+            var buffer = GetBuffer();
+            AppendMidiEvent(evt, ref buffer);
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

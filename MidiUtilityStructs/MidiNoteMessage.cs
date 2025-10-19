@@ -2,4 +2,4 @@
 
 namespace Midi.Net.MidiUtilityStructs;
 
-public readonly record struct MidiNoteMessage(bool IsNoteOff, NoteId NoteId, byte Velocity);
+public readonly record struct MidiNoteMessage(NoteId NoteId, byte Velocity);

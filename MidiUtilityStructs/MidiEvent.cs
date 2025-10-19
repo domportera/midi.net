@@ -22,6 +22,12 @@ public readonly record struct MidiEvent
         Data = new RawMidiData((byte)data.Controller, data.Value);
     }
 
+    public MidiEvent(MidiStatus status, MidiNoteMessage noteMessage)
+    {
+        Status = status;
+        Data = new RawMidiData((byte)noteMessage.NoteId, noteMessage.Velocity);
+    }
+
     public int CopyTo(byte[] buffer, int offset)
     {
         buffer[offset] = (byte)Status;

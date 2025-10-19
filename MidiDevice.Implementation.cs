@@ -8,9 +8,9 @@ public partial class MidiDevice
     {
         var dataSpan = new ReadOnlySpan<byte>(e.Data, e.Start, e.Length);
 
-        if (!MidiParser.TryInterpret(ref _inputStatus, dataSpan, out var msg))
+        if (!MidiParser.TryInterpret(ref _inputStatus, dataSpan, out var msg, out var message))
         {
-            _ = Console.Error.WriteLineAsync("Failed to parse MIDI message");
+            _ = Console.Error.WriteLineAsync($"Failed to parse MIDI message: {message}");
             return;
         }
 
@@ -65,7 +65,6 @@ public partial class MidiDevice
             {
                 // On Unix-based systems, only dispose input
                 await Input.CloseAsync();
-                Input.Dispose();
             }
             else
             {
