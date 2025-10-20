@@ -66,13 +66,14 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
     public async Task CloseAsync()
     {
         ObjectDisposedException.ThrowIf(IsDisposed, this);
+        GC.SuppressFinalize(this);
         await Dispose(true);
     }
 
     public void Dispose()
     {
+            GC.SuppressFinalize(this);
         _ = Dispose(true);
-        GC.SuppressFinalize(this);
     }
 
     public void CommitNrpn(int nrpn, int value, int channel)

@@ -58,21 +58,18 @@ public partial class MidiDevice
             {
                 await Input.CloseAsync();
                 await Output.CloseAsync();
-                Input.Dispose();
-                Output.Dispose();
             }
             else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             {
                 // On Unix-based systems, only dispose input
                 await Input.CloseAsync();
+                await Output.CloseAsync();
             }
             else
             {
                 // For unsupported platforms, dispose both to be safe
                 await Input.CloseAsync();
                 await Output.CloseAsync();
-                Input.Dispose();
-                Output.Dispose();
             }
         }
         catch (Exception e)
