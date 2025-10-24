@@ -17,6 +17,8 @@ public readonly record struct MidiStatus
     {
         _value = (byte)((byte)type | channel);
     }
+    
+    public bool IsStatusByte => (_value & 0b10000000) != 0 && _value != MidiConstants.Eox;
 
     public static explicit operator byte(MidiStatus status) => status._value;
     public static explicit operator MidiStatus(byte value) => new(value);

@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Text;
 using Midi.Net.MidiUtilityStructs;
 
 namespace Midi.Net;
@@ -18,46 +19,64 @@ public static class MidiParser
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ushort Value14Bit(byte msb, byte lsb) => (ushort)((msb << 7) | lsb);
 
-    public static bool TryInterpret(ref MidiStatus? latest, ReadOnlySpan<byte> bytes,
-        [NotNullWhen(true)] out MidiEvent? midi, [NotNullWhen(false)] out string? reason)
+    public static int Interpret(ref MidiStatus? latestStatus, ReadOnlySpan<byte> bytes, Span<MidiEvent> midiEvents, StringBuilder sb)
     {
-        if (bytes.Length is not 2 && bytes.Length is not 3)
+        // find where the message ends - there may be multiple messages in a single call to this message
+        // we know the message ends when we have a status byte with the status bit set
+        
+        int count = 0;
+        if (bytes.Length < 2)
         {
-            reason = "MIDI message must 2 or 3 bytes long. Length: " + bytes.Length;
-            midi = null;
-            return false;
+            sb.Append("MIDI message must 2 or 3 bytes long. Length: ").Append(bytes.Length);
+            return count;
+        }
+        
+        // get the splits characterized by the status bits
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            var b = bytes[i];
+            
+            var status = new MidiStatus(b);
+            int dataStartIndex;
+            if (!status.IsStatusByte)
+            {
+                if (latestStatus != null)
+                {
+                    status = latestStatus.Value;
+                    dataStartIndex = i;
+                }
+                else
+                {
+                    sb.AppendLine("No status available");
+                    continue;
+                }
+            }
+            else
+            {
+                dataStartIndex = i + 1;
+            }
+
+            var dataEndIndex = dataStartIndex + 1;
+            if (dataEndIndex >= bytes.Length)
+            {
+                sb.AppendLine("MIDI message must be at least 2 bytes long");
+                return count;
+            }
+
+            if (new MidiStatus(bytes[dataStartIndex]).IsStatusByte)
+            {
+                // this must be a "realtime" message - ignore for now
+                sb.AppendLine("Ignoring real-time message - not yet supported");
+                continue;
+            }
+
+            latestStatus = status;
+            var midiEvent = new MidiEvent(status, bytes[dataStartIndex], bytes[dataEndIndex]);
+            midiEvents[count++] = midiEvent;
+            
+            i = dataEndIndex;
         }
 
-        var evt = new RawMidiEvent(bytes);
-        if (evt.IsRealTime)
-        {
-            midi = null;
-            reason = "Ignoring real-time message - not yet supported";
-            return false;
-        }
-
-        if (evt.HasStatus)
-        {
-            var status = evt.Status;
-            latest = status;
-            var count = (byte)(bytes.Length - 1);
-            var span = count == 0 ? ReadOnlySpan<byte>.Empty : bytes[1..(1 + count)];
-            midi = new MidiEvent(status, new RawMidiData(span));
-            reason = null;
-            return true;
-        }
-
-        if (latest != null)
-        {
-            // inherit the previous status (running status)
-            midi = new MidiEvent(latest.Value, new RawMidiData(bytes));
-            reason = null;
-            return true;
-        }
-
-        // No status available - spec says to ignore the message
-        midi = null;
-        reason = "No status available";
-        return false;
+        return count;
     }
 }

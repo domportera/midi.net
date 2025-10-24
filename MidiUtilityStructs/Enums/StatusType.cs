@@ -10,5 +10,5 @@ public enum StatusType : byte
     CC = ControlChange,
     ProgramChange = 0b11000000,
     ChannelPressure = 0b11010000,
-    PitchBend = 0b11100000
+    PitchBend = 0b11100000,
 };

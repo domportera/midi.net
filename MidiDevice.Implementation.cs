@@ -1,26 +1,39 @@
-﻿using Commons.Music.Midi;
+﻿using System.Text;
+using Commons.Music.Midi;
+using MidiEvent = Midi.Net.MidiUtilityStructs.MidiEvent;
 
 namespace Midi.Net;
 
 public partial class MidiDevice
 {
+    private readonly StringBuilder _midiEventStringBuilder = new();
     private void OnMessageReceived(object? sender, MidiReceivedEventArgs e)
     {
         var dataSpan = new ReadOnlySpan<byte>(e.Data, e.Start, e.Length);
-
-        if (!MidiParser.TryInterpret(ref _inputStatus, dataSpan, out var msg, out var message))
+        Span<MidiEvent> midiEvents = stackalloc MidiEvent[dataSpan.Length];
+        
+            
+        var eventCount = MidiParser.Interpret(ref _inputStatus, dataSpan, midiEvents, _midiEventStringBuilder);
+        if (_midiEventStringBuilder.Length > 0)
         {
-            _ = Console.Error.WriteLineAsync($"Failed to parse MIDI message: {message}");
+            _ = Console.Out.WriteLineAsync(_midiEventStringBuilder.ToString());
+            _midiEventStringBuilder.Clear();
+        }
+
+        if (eventCount == 0)
             return;
-        }
-
-        try
+        
+        var parsedMidiEvents = midiEvents[..eventCount];
+        for (int i = 0; i < parsedMidiEvents.Length; i++)
         {
-            MidiReceived?.Invoke(this, msg.Value);
-        }
-        catch (Exception ex)
-        {
-            _ = Console.Error.WriteLineAsync(ex.ToString());
+            try
+            {
+                MidiReceived?.Invoke(this, parsedMidiEvents[i]);
+            }
+            catch (Exception ex)
+            {
+                _ = Console.Error.WriteLineAsync(ex.ToString());
+            }
         }
     }
 
