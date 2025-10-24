@@ -59,12 +59,30 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             if (signaledIndex == 1) // cancellation requested
                 break;
 
-           PushMidiImmediately();
+            PushMidiImmediately();
         }
+    }
+
+    protected virtual Task<(bool Success, string? Error)> OnClose()
+    {
+        return Task.FromResult<(bool, string?)>((true, null));
     }
 
     public async Task CloseAsync()
     {
+        try
+        {
+            var closeResult = await OnClose();
+            if(!closeResult.Success)
+            {
+                await Console.Error.WriteLineAsync($"Error closing MIDI device: {closeResult.Error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            await Console.Error.WriteLineAsync($"Error closing MIDI device: {ex.Message}");
+        }
+
         ObjectDisposedException.ThrowIf(IsDisposed, this);
         GC.SuppressFinalize(this);
         await Dispose(true);
@@ -72,7 +90,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
 
     public void Dispose()
     {
-            GC.SuppressFinalize(this);
+        GC.SuppressFinalize(this);
         _ = Dispose(true);
     }
 
@@ -99,7 +117,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             if (!_sendQueue.TryDequeue(out buffer))
                 return;
         }
-            
+
         try
         {
             Output.Send(buffer.Data, 0, buffer.Position, 0);
@@ -151,7 +169,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
 
             foreach (var msg in messages)
             {
-                var midiEvt = new MidiEvent(new MidiStatus(StatusType.CC, channelByte), msg);
+                var midiEvt = new MidiEvent(channelByte, msg);
                 AppendMidiEvent(midiEvt, ref buffer);
             }
         }

@@ -1,9 +1,18 @@
-﻿namespace Midi.Net;
+﻿using System.Diagnostics.CodeAnalysis;
+using Midi.Net.MidiUtilityStructs;
+
+namespace Midi.Net;
 
 public interface ILEDGrid
 {
     public void CommitLED(int x, int y, LedColor color);
     public void PushLEDs();
+}
+
+public interface IGridController
+{
+    void Initialize(int width, int height);
+    bool TryParseMidiEvent(MidiEvent midiEvent, [NotNullWhen(true)] out PadStatusEvent? padStatusEvent);
 }
 
 // based on Linnstrument colors for now

@@ -1,10 +1,21 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using Midi.Net.MidiUtilityStructs;
 
 namespace Midi.Net;
 
 public static class MidiParser
 {
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float Value7BitNormalized(byte value) => value / 127f;
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float Value14BitNormalized(ushort value) => value / 16383f;
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float Value14BitNormalized(byte msb, byte lsb) => Value14BitNormalized(Value14Bit(msb, lsb));
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ushort Value14Bit(byte msb, byte lsb) => (ushort)((msb << 7) | lsb);
 
     public static bool TryInterpret(ref MidiStatus? latest, ReadOnlySpan<byte> bytes,
@@ -30,7 +41,7 @@ public static class MidiParser
             var status = evt.Status;
             latest = status;
             var count = (byte)(bytes.Length - 1);
-            var span = count == 0 ? ReadOnlySpan<byte>.Empty : bytes[1..count];
+            var span = count == 0 ? ReadOnlySpan<byte>.Empty : bytes[1..(1 + count)];
             midi = new MidiEvent(status, new RawMidiData(span));
             reason = null;
             return true;

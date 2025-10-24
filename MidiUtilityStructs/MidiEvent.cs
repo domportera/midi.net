@@ -3,7 +3,7 @@ using Midi.Net.MidiUtilityStructs.Enums;
 
 namespace Midi.Net.MidiUtilityStructs;
 
-[StructLayout(LayoutKind.Sequential, Size = 4, Pack = 1)]
+[StructLayout(LayoutKind.Sequential)]
 // todo - change size
 public readonly record struct MidiEvent
 {
@@ -16,15 +16,15 @@ public readonly record struct MidiEvent
         Data = data;
     }
 
-    public MidiEvent(MidiStatus status, ControlChangeMessage data)
+    public MidiEvent(byte channel, ControlChangeMessage data)
     {
-        Status = status;
+        Status = new MidiStatus(StatusType.ControlChange, channel);
         Data = new RawMidiData((byte)data.Controller, data.Value);
     }
 
-    public MidiEvent(MidiStatus status, MidiNoteMessage noteMessage)
+    public MidiEvent(byte channel, MidiNoteMessage noteMessage)
     {
-        Status = status;
+        Status = new MidiStatus(noteMessage.Velocity == 0 ? StatusType.NoteOff : StatusType.NoteOn, channel);
         Data = new RawMidiData((byte)noteMessage.NoteId, noteMessage.Velocity);
     }
 
@@ -68,5 +68,3 @@ public readonly record struct MidiEvent
     public bool IsNoteOff => Status.Type == StatusType.NoteOff ||
                              (Status.Type == StatusType.NoteOn && Data.Count is 2 && Data.B2 == 0);
 }
-
-public readonly record struct ControlChangeMessage(ControlChange Controller, byte Value);

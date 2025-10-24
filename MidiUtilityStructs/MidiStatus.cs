@@ -10,7 +10,7 @@ public readonly record struct MidiStatus
     [FixedAddressValueType] private readonly byte _value;
     public StatusType Type => (StatusType)(_value & 0xF0);
     public byte Channel => (byte)(_value & 0x0F);
-    public int UserChannel => Channel + 1;
+    public Channel ChannelName => (Channel)(Channel + 1);
     public MidiStatus(byte value) => _value = value;
 
     public MidiStatus(StatusType type, byte channel)
