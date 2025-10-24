@@ -12,7 +12,7 @@ public interface ILEDGrid
 public interface IGridController
 {
     void Initialize(int width, int height);
-    bool TryParseMidiEvent(MidiEvent midiEvent, [NotNullWhen(true)] out PadStatusEvent? padStatusEvent);
+    bool TryParseMidiEvent(MidiEvent midiEvent, out PadStatusEvent? padStatusEvent, [NotNullWhen(false)] out string? reason);
 }
 
 // based on Linnstrument colors for now
