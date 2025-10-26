@@ -1,8 +1,4 @@
-﻿using System.Diagnostics.CodeAnalysis;
-using System.Runtime.InteropServices;
-using Commons.Music.Midi;
-using Commons.Music.Midi.CoreMidiApi;
-using Commons.Music.Midi.RtMidi;
+﻿using Commons.Music.Midi;
 
 namespace Midi.Net;
 
@@ -10,31 +6,25 @@ public static partial class DeviceHandler
 {
     private static readonly IMidiAccess2 MidiAccess = new MidiOpener();
 
-    public static async Task<(DeviceOpenResult Info, T? Device)> TryOpen<T>(string deviceSearchTerm)
+    public static async Task<DeviceOpenResult<T>> TryOpen<T>(string deviceSearchTerm)
         where T : MidiDevice, new()
     {
         var (result, midiInput, midiOutput) = await TryOpen(deviceSearchTerm);
         if (result != DeviceOpenResult.Success)
-            return (result, null);
+            return new DeviceOpenResult<T>(result, null);
 
-        return (result, new T
+
+        var device = new T
         {
             Input = midiInput!,
             Output = midiOutput!
-        });
+        };
+
+        await device.OnConnect();
+        return new DeviceOpenResult<T>(result, device);
     }
 
-    public enum DeviceOpenResult
-    {
-        Success,
-        InputNotFound,
-        OutputNotFound,
-        InputOpenFailed,
-        OutputOpenFailed
-    }
-
-    internal static async Task<(DeviceOpenResult, IMidiInput? midiInput, IMidiOutput? midiOutput)> TryOpen(
-        string deviceSearchTerm)
+    private static async Task<DeviceOpenResult<IMidiInput, IMidiOutput>> TryOpen(string deviceSearchTerm)
     {
         IMidiInput? midiInput = null;
         IMidiOutput? midiOutput = null;
@@ -51,7 +41,7 @@ public static partial class DeviceHandler
                 }
                 catch (Exception)
                 {
-                    return (DeviceOpenResult.InputOpenFailed, null, null);
+                    return new DeviceOpenResult<IMidiInput, IMidiOutput>(DeviceOpenResult.InputOpenFailed, null, null);
                 }
 
                 break;
@@ -62,7 +52,7 @@ public static partial class DeviceHandler
         {
             midiOutput?.Dispose();
             midiOutput = null;
-            return (DeviceOpenResult.InputNotFound, midiInput, midiOutput);
+            return new DeviceOpenResult<IMidiInput, IMidiOutput>(DeviceOpenResult.InputNotFound, midiInput, midiOutput);
         }
 
         foreach (var output in MidiAccess.Outputs)
@@ -78,7 +68,8 @@ public static partial class DeviceHandler
                 }
                 catch (Exception)
                 {
-                    return (DeviceOpenResult.OutputOpenFailed, midiInput, midiOutput);
+                    return new DeviceOpenResult<IMidiInput, IMidiOutput>(DeviceOpenResult.OutputOpenFailed, midiInput,
+                        midiOutput);
                 }
 
                 break;
@@ -90,9 +81,10 @@ public static partial class DeviceHandler
             await Console.Error.WriteLineAsync("Failed to open MIDI device output");
             midiInput.Dispose();
             midiInput = null;
-            return (DeviceOpenResult.OutputNotFound, midiInput, midiOutput);
+            return new DeviceOpenResult<IMidiInput, IMidiOutput>(DeviceOpenResult.OutputNotFound, midiInput,
+                midiOutput);
         }
 
-        return (DeviceOpenResult.Success, midiInput, midiOutput);
+        return new DeviceOpenResult<IMidiInput, IMidiOutput>(DeviceOpenResult.Success, midiInput, midiOutput);
     }
 }

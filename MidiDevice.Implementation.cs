@@ -7,13 +7,21 @@ namespace Midi.Net;
 public partial class MidiDevice
 {
     private readonly StringBuilder _midiEventStringBuilder = new();
+    private MidiEvent[] _midiEvents = Array.Empty<MidiEvent>();
     private void OnMessageReceived(object? sender, MidiReceivedEventArgs e)
     {
         var dataSpan = new ReadOnlySpan<byte>(e.Data, e.Start, e.Length);
-        Span<MidiEvent> midiEvents = stackalloc MidiEvent[dataSpan.Length];
-        
+        if (dataSpan.Length == 0)
+            return;
+
+        if (_midiEvents.Length < dataSpan.Length)
+        {
+            // intentionally keep this array as small as possible
+            _midiEvents = new MidiEvent[dataSpan.Length];
+        }
             
-        var eventCount = MidiParser.Interpret(ref _inputStatus, dataSpan, midiEvents, _midiEventStringBuilder);
+            
+        var eventCount = MidiParser.Interpret(ref _inputStatus, dataSpan, _midiEvents, _midiEventStringBuilder);
         if (_midiEventStringBuilder.Length > 0)
         {
             _ = Console.Out.WriteLineAsync(_midiEventStringBuilder.ToString());
@@ -23,17 +31,15 @@ public partial class MidiDevice
         if (eventCount == 0)
             return;
         
-        var parsedMidiEvents = midiEvents[..eventCount];
-        for (int i = 0; i < parsedMidiEvents.Length; i++)
+        var memory = new ReadOnlyMemory<MidiEvent>(_midiEvents, 0, eventCount);
+        try
         {
-            try
-            {
-                MidiReceived?.Invoke(this, parsedMidiEvents[i]);
-            }
-            catch (Exception ex)
-            {
-                _ = Console.Error.WriteLineAsync(ex.ToString());
-            }
+            // todo - raise multiple with a single invocation - ReadOnlyMemory-style?
+            MidiReceived?.Invoke(this, memory);
+        }
+        catch (Exception ex)
+        {
+            _ = Console.Error.WriteLineAsync(ex.ToString());
         }
     }
 
@@ -66,22 +72,14 @@ public partial class MidiDevice
         try
         {
             Input.MessageReceived -= OnMessageReceived;
+            
+            if (Input.Connection == MidiPortConnectionState.Open)
+            {
+                await Input.CloseAsync();
+            }
 
-            if (OperatingSystem.IsWindows())
+            if (Output.Connection == MidiPortConnectionState.Open)
             {
-                await Input.CloseAsync();
-                await Output.CloseAsync();
-            }
-            else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
-            {
-                // On Unix-based systems, only dispose input
-                await Input.CloseAsync();
-                await Output.CloseAsync();
-            }
-            else
-            {
-                // For unsupported platforms, dispose both to be safe
-                await Input.CloseAsync();
                 await Output.CloseAsync();
             }
         }

@@ -13,7 +13,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
     public string Version => Input.Details.Version;
     public string Id => Input.Details.Id;
     public bool IsDisposed { get; private set; }
-    public event EventHandler<MidiEvent>? MidiReceived;
+    public event EventHandler<ReadOnlyMemory<MidiEvent>>? MidiReceived;
     public ConnectionState ConnectionState => (ConnectionState)Input.Connection;
     private readonly AutoResetEvent _midiSendEvent = new(false);
     private readonly CancellationTokenSource _cancellationTokenSource = new();
@@ -63,17 +63,16 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
         }
     }
 
-    protected virtual Task<(bool Success, string? Error)> OnClose()
-    {
-        return Task.FromResult<(bool, string?)>((true, null));
-    }
+    protected virtual Task<(bool Success, string? Error)> OnClose() => Task.FromResult<(bool, string?)>((true, null));
+
+    protected internal virtual Task OnConnect() => Task.CompletedTask;
 
     public async Task CloseAsync()
     {
         try
         {
             var closeResult = await OnClose();
-            if(!closeResult.Success)
+            if (!closeResult.Success)
             {
                 await Console.Error.WriteLineAsync($"Error closing MIDI device: {closeResult.Error}");
             }
