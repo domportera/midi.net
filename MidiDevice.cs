@@ -6,6 +6,7 @@ using MidiEvent = Midi.Net.MidiUtilityStructs.MidiEvent;
 
 namespace Midi.Net;
 
+// todo: seal this class, have a separate interface for device-specific functionality
 public partial class MidiDevice : IMidiInput, IMidiOutput
 {
     public string Name => Input.Details.Name;
@@ -69,28 +70,32 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
 
     public async Task CloseAsync()
     {
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+#pragma warning disable CA1816
+        GC.SuppressFinalize(this);
+#pragma warning restore CA1816
+        
         try
         {
+            // invoke implementation-specific close logic
             var closeResult = await OnClose();
             if (!closeResult.Success)
             {
-                await Console.Error.WriteLineAsync($"Error closing MIDI device: {closeResult.Error}");
+                await Console.Error.WriteLineAsync($"Error while closing MIDI device: {closeResult.Error}");
             }
         }
         catch (Exception ex)
         {
-            await Console.Error.WriteLineAsync($"Error closing MIDI device: {ex.Message}");
+            await Console.Error.WriteLineAsync($"Error while closing MIDI device: {ex.Message}");
         }
 
-        ObjectDisposedException.ThrowIf(IsDisposed, this);
-        GC.SuppressFinalize(this);
+        // actually dispose
         await Dispose(true);
     }
 
     public void Dispose()
     {
-        GC.SuppressFinalize(this);
-        _ = Dispose(true);
+        CloseAsync().Wait();
     }
 
     public void CommitNrpn(int nrpn, int value, int channel)
@@ -185,7 +190,6 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
         lock (_bufferPoolLock)
         {
             _midiBufferPool.TryPop(out buffer);
-            ;
         }
 
         if (buffer == default)

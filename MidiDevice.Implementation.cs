@@ -69,15 +69,23 @@ public partial class MidiDevice
         await _cancellationTokenSource.CancelAsync();
         _midiSendEvent.Dispose();
 
+        Input.MessageReceived -= OnMessageReceived;
+        
         try
         {
-            Input.MessageReceived -= OnMessageReceived;
-            
             if (Input.Connection == MidiPortConnectionState.Open)
             {
                 await Input.CloseAsync();
             }
+            
+        }
+        catch (Exception e)
+        {
+            await Console.Error.WriteLineAsync($"Error during device disposal: {e.Message}");
+        }
 
+        try
+        {
             if (Output.Connection == MidiPortConnectionState.Open)
             {
                 await Output.CloseAsync();
@@ -91,6 +99,6 @@ public partial class MidiDevice
 
     ~MidiDevice()
     {
-        _ = Dispose(false);
+        Dispose(false).Wait();
     }
 }
