@@ -19,7 +19,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
     private readonly AutoResetEvent _midiSendEvent = new(false);
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 
-    protected MidiDevice()
+    public MidiDevice()
     {
         var args = new SendThreadArgs
         {
@@ -241,7 +241,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
     }
 
 
-    internal IMidiInput Input
+    public required IMidiInput Input
     {
         get => _input!;
         init
@@ -252,7 +252,7 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
     }
 
 
-    internal IMidiOutput Output
+    public required IMidiOutput Output
     {
         get => _output!;
         init => _output = value;
