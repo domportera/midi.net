@@ -1,4 +1,5 @@
-﻿using Commons.Music.Midi;
+﻿using System.Reflection.Metadata.Ecma335;
+using Commons.Music.Midi;
 
 namespace Midi.Net;
 
@@ -22,18 +23,21 @@ public static partial class DeviceHandler
         MatchAnyAsFallback = 1 << 31
     }
     
+    public static async Task<DeviceOpenResult> TryOpen(string? deviceSearchTerm = null,
+        SearchMode searchMode = SearchMode.UseDeviceName | SearchMode.Contains | SearchMode.CaseInsensitive)
+    {
+        deviceSearchTerm ??= "";
+        var searchTerm = new DeviceSearchTerm(deviceSearchTerm, searchMode);
+        return await TryOpen(searchTerm);
+    }
+    
     public static async Task<DeviceOpenResult<T>> TryOpen<T>(string? deviceSearchTerm = null,
         SearchMode searchMode = SearchMode.UseDeviceName | SearchMode.Contains | SearchMode.CaseInsensitive)
         where T : IMidiDevice, new()
     {
         deviceSearchTerm ??= typeof(T).Name;
-
-        var searchTerm = new DeviceSearchTerm(deviceSearchTerm, searchMode);
-
-        var details = await TryOpen(searchTerm, searchMode);
-        T? device = default;
-        
-        device = new T
+        var details = await TryOpen(deviceSearchTerm, searchMode);
+        var device = new T
         {
             MidiDevice = new MidiDevice
             {
@@ -41,7 +45,23 @@ public static partial class DeviceHandler
                 Output = details.Output.Port!
             }
         };
-        
+
+        if (details.IsSuccess)
+        {
+            try
+            {
+                var result = await device.OnConnect();
+                if (!result.Success)
+                {
+                    return new DeviceOpenResult<T>(device, details, result.Error);
+                }
+            }
+            catch (Exception e)
+            {
+                return new DeviceOpenResult<T>(device, details, e.ToString());
+            }
+        }
+
         return new DeviceOpenResult<T>(device, details);
     }
 
@@ -49,8 +69,7 @@ public static partial class DeviceHandler
     private static readonly PortOpenResult<IMidiInput> InputNotFound = new(PortOpenStatus.NotFound, null, null);
     private static readonly PortOpenResult<IMidiOutput> OutputNotFound = new(PortOpenStatus.NotFound, null, null);
 
-    private static async Task<DeviceOpenResult> TryOpen(DeviceSearchTerm deviceSearchTerm,
-        SearchMode searchMode)
+    private static async Task<DeviceOpenResult> TryOpen(DeviceSearchTerm deviceSearchTerm)
     {
         var midiInput = InputNotFound;
         var midiOutput = OutputNotFound;
@@ -58,7 +77,7 @@ public static partial class DeviceHandler
         var inputs = MidiAccess.Inputs.Where(x => x != null).ToArray();
         foreach (var input in inputs)
         {
-            if (!Matches(deviceSearchTerm, searchMode, input)) continue;
+            if (!Matches(deviceSearchTerm, input)) continue;
             midiInput = await TryOpenInput(input);
             break;
         }
@@ -66,13 +85,13 @@ public static partial class DeviceHandler
         var outputs = MidiAccess.Outputs.ToArray();
         foreach (var output in outputs)
         {
-            if (!Matches(deviceSearchTerm, searchMode, output)) continue;
+            if (!Matches(deviceSearchTerm, output)) continue;
             midiOutput = await TryOpenOutput(output);
             break;
         }
 
 
-        if (searchMode.Has(SearchMode.MatchAnyAsFallback))
+        if (deviceSearchTerm.Flags.Has(SearchMode.MatchAnyAsFallback))
         {
             // we can use a fallback device
             // todo: heuristics on the "best" device to use
@@ -132,9 +151,19 @@ public static partial class DeviceHandler
         }
     }
 
-    private static bool Matches(DeviceSearchTerm searchTerm, SearchMode searchMode, IMidiPortDetails details)
+    private static bool Matches(DeviceSearchTerm searchTerm, IMidiPortDetails details)
     {
-        var flags = searchTerm.Flags & searchMode;
+        if (string.IsNullOrWhiteSpace(searchTerm.Term))
+        {
+            if (!searchTerm.Flags.Has(SearchMode.MatchAnyAsFallback))
+            {
+                Console.Error.WriteLine($"No search term provided, and search mode does not include " +
+                                        $"{SearchMode.MatchAnyAsFallback} - is this intended?");
+            }
+            return true;
+        }
+        
+        var flags = searchTerm.Flags;
         if (flags == SearchMode.None)
             return false;
 

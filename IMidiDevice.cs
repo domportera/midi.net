@@ -2,7 +2,8 @@ namespace Midi.Net;
 
 public interface IMidiDevice
 {
+    public bool IsConnected => MidiDevice is { ConnectionState: ConnectionState.Open };
     public MidiDevice MidiDevice { get; init; }
-    Task OnConnect();
-    Task<(bool Success, string? Error)> OnClose();
+    Task<(bool Success, string? Error)> OnConnect();
+    Task<(bool Success, string? Error)> CloseAsync();
 }
