@@ -38,7 +38,7 @@ public static class MidiParser
             
             var status = new MidiStatus(b);
             int dataStartIndex;
-            if (!status.IsStatusByte)
+            if (!status.IsStatusByte || bytes.Length == i + 1)
             {
                 if (latestStatus != null)
                 {
@@ -51,17 +51,16 @@ public static class MidiParser
                     continue;
                 }
             }
+            else if (status.IsStatusByte)
+            {
+                dataStartIndex = i + 1;
+                latestStatus = status;
+            }
             else
             {
                 dataStartIndex = i + 1;
             }
 
-            var dataEndIndex = dataStartIndex + 1;
-            if (dataEndIndex >= bytes.Length)
-            {
-                sb.AppendLine("MIDI message must be at least 2 bytes long");
-                return count;
-            }
 
             if (new MidiStatus(bytes[dataStartIndex]).IsStatusByte)
             {
@@ -70,9 +69,16 @@ public static class MidiParser
                 continue;
             }
 
-            latestStatus = status;
-            var midiEvent = new MidiEvent(status, bytes[dataStartIndex], bytes[dataEndIndex]);
-            midiEvents[count++] = midiEvent;
+            
+            var dataEndIndex = dataStartIndex + 1;
+            if (dataEndIndex == bytes.Length)
+            {
+                midiEvents[count++] = new MidiEvent(status, 0, bytes[dataStartIndex]);
+            }
+            else
+            {
+                midiEvents[count++] = new MidiEvent(status, bytes[dataStartIndex], bytes[dataEndIndex]);
+            }
             
             i = dataEndIndex;
         }

@@ -20,8 +20,8 @@ public readonly struct ControlChangeMessage
 
     public ControlChangeMessage(in MidiEvent data)
     {
-        CCNumber = data.DataB1;
-        Value = data.DataB2;
+        CCNumber = data.DataB1OrMsb;
+        Value = data.DataB2OrLsb;
     }
 
     [FieldOffset(0)] public readonly ControlChange Controller;

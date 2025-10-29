@@ -1,5 +1,4 @@
-﻿using System.Reflection.Metadata;
-using Commons.Music.Midi;
+﻿using Commons.Music.Midi;
 
 namespace Midi.Net;
 
@@ -33,17 +32,15 @@ public static partial class DeviceHandler
 
         var details = await TryOpen(searchTerm, searchMode);
         T? device = default;
-        if (details.IsSuccess)
+        
+        device = new T
         {
-            device = new T
+            MidiDevice = new MidiDevice
             {
-                MidiDevice = new MidiDevice
-                {
-                    Input = new DeviceOpenResult().Input.Port!,
-                    Output = new DeviceOpenResult().Output.Port!
-                }
-            };
-        }
+                Input = details.Input.Port!,
+                Output = details.Output.Port!
+            }
+        };
         
         return new DeviceOpenResult<T>(device, details);
     }

@@ -113,18 +113,25 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
         );
     }
 
-    public void PushMidiImmediately()
+    public bool PushMidiImmediately()
     {
         Buffer buffer;
         lock (_sendQueueLock)
         {
             if (!_sendQueue.TryDequeue(out buffer))
-                return;
+                return true;
+        }
+
+        if (Output == null)
+        {
+            return false;
         }
 
         try
         {
             Output.Send(buffer.Data, 0, buffer.Position, 0);
+            ReturnBufferToPool(ref buffer);
+            return true;
         }
         catch (Exception ex)
         {
@@ -136,9 +143,10 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             {
                 // ignore
             }
-        }
 
-        ReturnBufferToPool(ref buffer);
+            ReturnBufferToPool(ref buffer);
+            return false;
+        }
     }
 
     protected void AppendMidiEvent(in MidiEvent evt)
@@ -246,8 +254,16 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
         get => _input!;
         init
         {
+            if (_input != null)
+            {
+                _input.MessageReceived -= OnMessageReceived;
+            }
+            
             _input = value;
-            _input.MessageReceived += OnMessageReceived;
+            if (_input != null)
+            {
+                _input.MessageReceived += OnMessageReceived;
+            }
         }
     }
 
