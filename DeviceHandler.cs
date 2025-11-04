@@ -22,7 +22,7 @@ public static partial class DeviceHandler
         Contains = 1 << 30,
         MatchAnyAsFallback = 1 << 31
     }
-    
+
     public static async Task<DeviceOpenResult> TryOpen(string? deviceSearchTerm = null,
         SearchMode searchMode = SearchMode.UseDeviceName | SearchMode.Contains | SearchMode.CaseInsensitive)
     {
@@ -30,7 +30,7 @@ public static partial class DeviceHandler
         var searchTerm = new DeviceSearchTerm(deviceSearchTerm, searchMode);
         return await TryOpen(searchTerm);
     }
-    
+
     public static async Task<DeviceOpenResult<T>> TryOpen<T>(string? deviceSearchTerm = null,
         SearchMode searchMode = SearchMode.UseDeviceName | SearchMode.Contains | SearchMode.CaseInsensitive)
         where T : IMidiDevice, new()
@@ -45,6 +45,8 @@ public static partial class DeviceHandler
                 Output = details.Output.Port!
             }
         };
+
+        device.MidiDevice.Reconnected += device.OnConnect;
 
         if (details.IsSuccess)
         {
@@ -66,6 +68,7 @@ public static partial class DeviceHandler
     }
 
     private readonly record struct DeviceSearchTerm(string Term, SearchMode Flags);
+
     private static readonly PortOpenResult<IMidiInput> InputNotFound = new(PortOpenStatus.NotFound, null, null);
     private static readonly PortOpenResult<IMidiOutput> OutputNotFound = new(PortOpenStatus.NotFound, null, null);
 
@@ -81,7 +84,7 @@ public static partial class DeviceHandler
             midiInput = await TryOpenInput(input);
             break;
         }
-        
+
         var outputs = MidiAccess.Outputs.ToArray();
         foreach (var output in outputs)
         {
@@ -98,17 +101,23 @@ public static partial class DeviceHandler
             if (midiInput == InputNotFound && inputs.Length > 0)
             {
                 var fallbackInput = inputs[0];
+                midiInput = await TryOpenInput(fallbackInput);
             }
 
             if (midiOutput == OutputNotFound && outputs.Length > 0)
             {
                 var fallbackOutput = outputs[0];
+                midiOutput = await TryOpenOutput(fallbackOutput);
             }
         }
 
+        if (midiInput.Status != PortOpenStatus.Success || midiOutput.Status != PortOpenStatus.Success)
+        {
+            return new DeviceOpenResult(null, midiInput, midiOutput);
+        }
 
-        return new DeviceOpenResult(midiInput, midiOutput);
-
+        var midiDevice = new MidiDevice { Input = midiInput.Port!, Output = midiOutput.Port! };
+        return new DeviceOpenResult(midiDevice, midiInput, midiOutput);
 
         static async Task<PortOpenResult<IMidiInput>> TryOpenInput(IMidiPortDetails details)
         {
@@ -121,7 +130,7 @@ public static partial class DeviceHandler
                     MidiPortConnectionState.Pending => PortOpenStatus.OpenPending,
                     _ => PortOpenStatus.OpenFailed
                 };
-                
+
                 return new PortOpenResult<IMidiInput>(status, port, details);
             }
             catch (Exception e)
@@ -141,7 +150,7 @@ public static partial class DeviceHandler
                     MidiPortConnectionState.Pending => PortOpenStatus.OpenPending,
                     _ => PortOpenStatus.OpenFailed
                 };
-                
+
                 return new PortOpenResult<IMidiOutput>(status, port, details);
             }
             catch (Exception e)
@@ -160,9 +169,10 @@ public static partial class DeviceHandler
                 Console.Error.WriteLine($"No search term provided, and search mode does not include " +
                                         $"{SearchMode.MatchAnyAsFallback} - is this intended?");
             }
+
             return true;
         }
-        
+
         var flags = searchTerm.Flags;
         if (flags == SearchMode.None)
             return false;

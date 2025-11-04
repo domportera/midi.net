@@ -1,24 +1,16 @@
 ﻿using System.Runtime.CompilerServices;
 using Commons.Music.Midi;
 using Midi.Net.MidiUtilityStructs;
-using Midi.Net.MidiUtilityStructs.Enums;
 using MidiEvent = Midi.Net.MidiUtilityStructs.MidiEvent;
 
 namespace Midi.Net;
 
 // todo: seal this class, have a separate interface for device-specific functionality
-public partial class MidiDevice : IMidiInput, IMidiOutput
+public sealed partial class MidiDevice : IMidiInput, IMidiOutput, IAsyncDisposable
 {
-    public string Name => Input.Details.Name;
-    public string Manufacturer => Input.Details.Manufacturer;
-    public string Version => Input.Details.Version;
-    public string Id => Input.Details.Id;
-    public bool IsDisposed { get; private set; }
-    public event EventHandler<ReadOnlyMemory<MidiEvent>>? MidiReceived;
-    public ConnectionState ConnectionState => (ConnectionState)Input.Connection;
     private readonly AutoResetEvent _midiSendEvent = new(false);
     private readonly CancellationTokenSource _cancellationTokenSource = new();
-
+    
     public MidiDevice()
     {
         var args = new SendThreadArgs
@@ -60,103 +52,58 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             if (signaledIndex == 1) // cancellation requested
                 break;
 
-            PushMidiImmediately();
-        }
-    }
-
-    protected virtual Task<(bool Success, string? Error)> OnClose() => Task.FromResult<(bool, string?)>((true, null));
-
-    protected internal virtual Task OnConnect() => Task.CompletedTask;
-
-    public async Task CloseAsync()
-    {
-        ObjectDisposedException.ThrowIf(IsDisposed, this);
-#pragma warning disable CA1816
-        GC.SuppressFinalize(this);
-#pragma warning restore CA1816
-        
-        try
-        {
-            // invoke implementation-specific close logic
-            var closeResult = await OnClose();
-            if (!closeResult.Success)
+            if(!PushMidiImmediately())
             {
-                await Console.Error.WriteLineAsync($"Error while closing MIDI device: {closeResult.Error}");
+                Reconnect();
             }
         }
-        catch (Exception ex)
-        {
-            await Console.Error.WriteLineAsync($"Error while closing MIDI device: {ex.Message}");
-        }
-
-        // actually dispose
-        await Dispose(true);
     }
 
-    public void Dispose()
+    private void Reconnect()
     {
-        CloseAsync().Wait();
-    }
+        var wasAlreadyReconnecting = Interlocked.Exchange(ref _isReconnecting, true);
+        if (wasAlreadyReconnecting)
+            return;
+        
+        var token = _cancellationTokenSource.Token;
 
-    public void CommitNrpn(int nrpn, int value, int channel)
-    {
-        var nrpnLsb = (byte)(nrpn & 0x7F);
-        var nrpnMsb = (byte)((nrpn >> 7) & 0x7F);
-
-        var valueLsb = (byte)(value & 0x7F);
-        var valueMsb = (byte)((value >> 7) & 0x7F);
-        CommitCC(channel,
-            new ControlChangeMessage(ControlChange.NrpnMsb, nrpnMsb),
-            new ControlChangeMessage(ControlChange.NrpnLsb, nrpnLsb),
-            new ControlChangeMessage(ControlChange.DataEntryMsb, valueMsb),
-            new ControlChangeMessage(ControlChange.DataEntryLsb, valueLsb)
-        );
-    }
-
-    public bool PushMidiImmediately()
-    {
-        Buffer buffer;
-        lock (_sendQueueLock)
-        {
-            if (!_sendQueue.TryDequeue(out buffer))
-                return true;
-        }
-
-        if (Output == null)
-        {
-            return false;
-        }
-
-        try
-        {
-            Output.Send(buffer.Data, 0, buffer.Position, 0);
-            ReturnBufferToPool(ref buffer);
-            return true;
-        }
-        catch (Exception ex)
+        // strategy #1 - let's see if this works
+        // all we do is wait for the backend to mark their connection state as open again
+        // if this doesn't work, we'll need to actually reconnect manually by disposing our input and output objects
+        // and creating new ones
+        // ReSharper disable once MethodSupportsCancellation
+        Task.Run(async () =>
         {
             try
             {
-                Console.Error.WriteLine(ex.ToString());
+                while (!token.IsCancellationRequested &&
+                       _input.Connection != MidiPortConnectionState.Open &&
+                       _output.Connection != MidiPortConnectionState.Open)
+                {
+                    // wait for the device to be ready
+                    await Task.Delay(1000, token).ConfigureAwait(false);
+                }
+
+                if (!token.IsCancellationRequested &&
+                    _input.Connection == MidiPortConnectionState.Open &&
+                    _output.Connection == MidiPortConnectionState.Open)
+                {
+                    ForwardEvent(this, this, _onReconnectSubscriptions);
+                }
+
             }
-            catch
+            catch (Exception ex)
             {
-                // ignore
+                await Console.Error.WriteLineAsync(ex.ToString());
             }
-
-            ReturnBufferToPool(ref buffer);
-            return false;
-        }
+            
+            _isReconnecting = false;
+        });
     }
 
-    protected void AppendMidiEvent(in MidiEvent evt)
-    {
-        lock (_bufferLock)
-        {
-            var buffer = GetBuffer();
-            AppendMidiEvent(evt, ref buffer);
-        }
-    }
+    private bool _isReconnecting;
+    private readonly object _sendLock = new();
+   
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void AppendMidiEvent(in MidiEvent evt, ref Buffer buffer)
@@ -247,37 +194,11 @@ public partial class MidiDevice : IMidiInput, IMidiOutput
             _midiBufferPool.Push(buff); // return to pool
         }
     }
-
-
-    public required IMidiInput Input
-    {
-        get => _input!;
-        init
-        {
-            if (_input != null)
-            {
-                _input.MessageReceived -= OnMessageReceived;
-            }
-            
-            _input = value;
-            if (_input != null)
-            {
-                _input.MessageReceived += OnMessageReceived;
-            }
-        }
-    }
-
-
-    public required IMidiOutput Output
-    {
-        get => _output!;
-        init => _output = value;
-    }
-
+    
 
     private MidiStatus? _inputStatus;
-    private readonly IMidiInput? _input;
-    private readonly IMidiOutput? _output;
+    private readonly IMidiInput _input;
+    private readonly IMidiOutput _output;
 
     private readonly Lock _bufferLock = new();
     private readonly Lock _bufferPoolLock = new();

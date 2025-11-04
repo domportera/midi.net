@@ -25,8 +25,8 @@ public readonly record struct DeviceOpenResult<T>(T? Device, DeviceOpenResult De
     public static implicit operator bool (in DeviceOpenResult<T> result) => result.IsSuccess;
 }
 
-public readonly record struct DeviceOpenResult(PortOpenResult<IMidiInput> Input, PortOpenResult<IMidiOutput> Output)
+public readonly record struct DeviceOpenResult(MidiDevice? MidiDevice, PortOpenResult<IMidiInput> Input, PortOpenResult<IMidiOutput> Output)
 {
     // convert to bool
-    public bool IsSuccess => Input.IsSuccess && Output.IsSuccess;
+    public bool IsSuccess => Input.IsSuccess && Output.IsSuccess && MidiDevice is {ConnectionState: ConnectionState.Open};
 }
