@@ -8,29 +8,62 @@ public partial class MidiDevice
 {
     private readonly StringBuilder _midiEventStringBuilder = new();
     private MidiEvent[] _midiEvents = [];
+    private byte[] _buffer = [];
+    private int _bufferedCount;
     private void OnMessageReceived(object? sender, MidiReceivedEventArgs e)
     {
-        var dataSpan = new ReadOnlySpan<byte>(e.Data, e.Start, e.Length);
+        var dataSpan = new Span<byte>(e.Data, e.Start, e.Length);
         if (dataSpan.Length == 0)
             return;
+        
+        EnsureBufferLength(dataSpan);
+
+        if (dataSpan.Length + _bufferedCount < 2)
+        {
+            // not enough data to interpret
+            // append to our buffer and wait for more data
+            dataSpan.CopyTo(_buffer.AsSpan(_bufferedCount));
+            _bufferedCount += dataSpan.Length;
+            return;
+        }
+
+        if (_bufferedCount > 0)
+        {
+            // we have data that has been buffered - we need too append to that
+            // and then read from that
+            dataSpan.CopyTo(_buffer.AsSpan(_bufferedCount));
+            dataSpan = _buffer.AsSpan(0, _bufferedCount + dataSpan.Length);
+            _bufferedCount = 0;
+        }
 
         if (_midiEvents.Length < dataSpan.Length)
         {
-            // intentionally keep this array as small as possible
+            // ensure we have ample space for midi events
             _midiEvents = new MidiEvent[dataSpan.Length];
         }
             
+        var eventCount = MidiParser.Interpret(ref _inputStatus, dataSpan, _midiEvents, _midiEventStringBuilder, out var bytesUsed);
+
+        // copy any unused data to our buffer
+        _bufferedCount = dataSpan.Length - bytesUsed;
+        if (_bufferedCount > 0)
+        {
+            if(_buffer.Length < _bufferedCount)
+            {
+                Array.Resize(ref _buffer, _bufferedCount);
+            }
             
-        var eventCount = MidiParser.Interpret(ref _inputStatus, dataSpan, _midiEvents, _midiEventStringBuilder);
+            dataSpan[bytesUsed..].CopyTo(_buffer);
+        }
+        
+        // log any errors from parsing
         if (_midiEventStringBuilder.Length > 0)
         {
             _ = Console.Out.WriteLineAsync(_midiEventStringBuilder.ToString());
             _midiEventStringBuilder.Clear();
         }
-
-        if (eventCount == 0)
-            return;
         
+        // raise midi receive events
         var memory = new ReadOnlyMemory<MidiEvent>(_midiEvents, 0, eventCount);
         try
         {
@@ -42,7 +75,17 @@ public partial class MidiDevice
             _ = Console.Error.WriteLineAsync(ex.ToString());
         }
 
+        
         ForwardEvent(sender, e, _messageReceivedHandlers);
+    }
+
+    private void EnsureBufferLength(Span<byte> dataSpan)
+    {
+        if (dataSpan.Length + _bufferedCount >= _buffer.Length)
+        {
+            // increase buffer size
+            Array.Resize(ref _buffer, dataSpan.Length + _bufferedCount);
+        }
     }
 
     private static void ForwardEvent<T>(object? sender, T e, IList<EventHandler<T>> handlers)

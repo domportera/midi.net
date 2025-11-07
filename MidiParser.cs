@@ -19,7 +19,7 @@ public static class MidiParser
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ushort Value14Bit(byte msb, byte lsb) => (ushort)((msb << 7) | lsb);
 
-    public static int Interpret(ref MidiStatus? latestStatus, ReadOnlySpan<byte> bytes, Span<MidiEvent> midiEvents, StringBuilder sb)
+    public static int Interpret(ref MidiStatus? latestStatus, ReadOnlySpan<byte> bytes, MidiEvent[] midiEvents, StringBuilder sb, out int bytesUsed)
     {
         // find where the message ends - there may be multiple messages in a single call to this message
         // we know the message ends when we have a status byte with the status bit set
@@ -27,8 +27,7 @@ public static class MidiParser
         int count = 0;
         if (bytes.Length < 2)
         {
-            sb.Append("MIDI message must 2 or 3 bytes long. Length: ").Append(bytes.Length);
-            return count;
+            throw new ArgumentException("MIDI message must be 2 or 3 bytes long. Length: " + bytes.Length);
         }
         
         // get the splits characterized by the status bits
@@ -83,6 +82,7 @@ public static class MidiParser
             i = dataEndIndex;
         }
 
+        bytesUsed = bytes.Length;
         return count;
     }
 }

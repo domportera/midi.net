@@ -1,4 +1,4 @@
-﻿using System.Reflection.Metadata.Ecma335;
+﻿using System.Diagnostics;
 using Commons.Music.Midi;
 
 namespace Midi.Net;
@@ -23,140 +23,143 @@ public static partial class DeviceHandler
         MatchAnyAsFallback = 1 << 31
     }
 
-    public static async Task<DeviceOpenResult> TryOpen(string? deviceSearchTerm = null,
+    public static async Task<Result<T>> TryOpen<T>(string? deviceSearchTerm = null,
         SearchMode searchMode = SearchMode.UseDeviceName | SearchMode.Contains | SearchMode.CaseInsensitive)
-    {
-        deviceSearchTerm ??= "";
-        var searchTerm = new DeviceSearchTerm(deviceSearchTerm, searchMode);
-        return await TryOpen(searchTerm);
-    }
-
-    public static async Task<DeviceOpenResult<T>> TryOpen<T>(string? deviceSearchTerm = null,
-        SearchMode searchMode = SearchMode.UseDeviceName | SearchMode.Contains | SearchMode.CaseInsensitive)
-        where T : IMidiDevice, new()
+        where T : class, IMidiDevice, new()
     {
         deviceSearchTerm ??= typeof(T).Name;
-        var details = await TryOpen(deviceSearchTerm, searchMode);
+        var input = await TryOpenInput(deviceSearchTerm, searchMode);
+        var output = await TryOpenOutput(deviceSearchTerm, searchMode);
+
+        if (!input.Success || !output.Success)
+        {
+            if (input.Success)
+            {
+                input.Value?.Dispose();
+            }
+
+            if (output.Success)
+            {
+                output.Value?.Dispose();
+            }
+            
+            return new Result<T>(null, false, $"Input: {input.Message}\n\nOutput: {output.Message}");
+        }
+        
         var device = new T
         {
             MidiDevice = new MidiDevice
             {
-                Input = details.Input.Port!,
-                Output = details.Output.Port!
+                Input = input.Value!,
+                Output = output.Value!
             }
         };
 
-        device.MidiDevice.Reconnected += device.OnConnect;
-
-        if (details.IsSuccess)
+        try
         {
-            try
-            {
-                var result = await device.OnConnect();
-                if (!result.Success)
-                {
-                    return new DeviceOpenResult<T>(device, details, result.Error);
-                }
-            }
-            catch (Exception e)
-            {
-                return new DeviceOpenResult<T>(device, details, e.ToString());
-            }
+            await device.OnConnect();
+        }
+        catch (Exception ex)
+        {
+            await device.CloseAsync();
+            return new Result<T>(null, false, $"Failure in post-connection method: {ex}");
         }
 
-        return new DeviceOpenResult<T>(device, details);
+        device.MidiDevice.Reconnected += (_,_) => _ = device.OnConnect();
+        return new Result<T>(device, true, null);
     }
 
-    private readonly record struct DeviceSearchTerm(string Term, SearchMode Flags);
+    public readonly record struct DeviceSearchTerm(string Term, SearchMode Flags);
 
-    private static readonly PortOpenResult<IMidiInput> InputNotFound = new(PortOpenStatus.NotFound, null, null);
-    private static readonly PortOpenResult<IMidiOutput> OutputNotFound = new(PortOpenStatus.NotFound, null, null);
+    public static async Task<Result<IMidiInput>> TryOpenInput(string? searchTerm = null,
+        SearchMode searchMode = DefaultSearchMode) =>
+        await TryOpenPort<IMidiInput>(new DeviceSearchTerm(searchTerm ?? "", searchMode));
 
-    private static async Task<DeviceOpenResult> TryOpen(DeviceSearchTerm deviceSearchTerm)
+    public static async Task<Result<IMidiOutput>> TryOpenOutput(string? searchTerm = null,
+        SearchMode searchMode = DefaultSearchMode) =>
+        await TryOpenPort<IMidiOutput>(new DeviceSearchTerm(searchTerm ?? "", searchMode));
+
+    public static async Task<Result<IMidiInput>> TryOpenInput(DeviceSearchTerm deviceSearchTerm) =>
+        await TryOpenPort<IMidiInput>(deviceSearchTerm);
+
+    public static async Task<Result<IMidiOutput>> TryOpenOutput(DeviceSearchTerm deviceSearchTerm) =>
+        await TryOpenPort<IMidiOutput>(deviceSearchTerm);
+
+    public static async Task<Result<IMidiInput>> TryOpenInput(IMidiPortDetails details) =>
+        await TryOpenPort<IMidiInput>(details);
+
+    public static async Task<Result<IMidiOutput>> TryOpenOutput(IMidiPortDetails details) =>
+        await TryOpenPort<IMidiOutput>(details);
+
+    private static Result<T> NotFound<T>() where T : IMidiPort => new(default, false, "Not found");
+
+    private static async Task<Result<T>> TryOpenPort<T>(DeviceSearchTerm deviceSearchTerm)
+        where T : IMidiPort, IDisposable
     {
-        var midiInput = InputNotFound;
-        var midiOutput = OutputNotFound;
+        AssertPortType<T>();
+
+        var midiInput = NotFound<T>();
 
         var inputs = MidiAccess.Inputs.Where(x => x != null).ToArray();
         foreach (var input in inputs)
         {
             if (!Matches(deviceSearchTerm, input)) continue;
-            midiInput = await TryOpenInput(input);
+            midiInput = await TryOpenPort<T>(input);
             break;
         }
-
-        var outputs = MidiAccess.Outputs.ToArray();
-        foreach (var output in outputs)
-        {
-            if (!Matches(deviceSearchTerm, output)) continue;
-            midiOutput = await TryOpenOutput(output);
-            break;
-        }
-
 
         if (deviceSearchTerm.Flags.Has(SearchMode.MatchAnyAsFallback))
         {
             // we can use a fallback device
             // todo: heuristics on the "best" device to use
-            if (midiInput == InputNotFound && inputs.Length > 0)
+            if (midiInput == NotFound<IMidiInput>() && inputs.Length > 0)
             {
                 var fallbackInput = inputs[0];
-                midiInput = await TryOpenInput(fallbackInput);
-            }
-
-            if (midiOutput == OutputNotFound && outputs.Length > 0)
-            {
-                var fallbackOutput = outputs[0];
-                midiOutput = await TryOpenOutput(fallbackOutput);
+                midiInput = await TryOpenPort<T>(fallbackInput);
             }
         }
 
-        if (midiInput.Status != PortOpenStatus.Success || midiOutput.Status != PortOpenStatus.Success)
+
+        if (!midiInput.Success)
         {
-            return new DeviceOpenResult(null, midiInput, midiOutput);
+            midiInput.Value?.Dispose();
+            return new Result<T>(default, false, midiInput.Message);
         }
 
-        var midiDevice = new MidiDevice { Input = midiInput.Port!, Output = midiOutput.Port! };
-        return new DeviceOpenResult(midiDevice, midiInput, midiOutput);
+        Debug.Assert(midiInput.Value != null);
+        return new Result<T>(midiInput.Value, true, null);
+    }
 
-        static async Task<PortOpenResult<IMidiInput>> TryOpenInput(IMidiPortDetails details)
+    private static void AssertPortType<T>() where T : IMidiPort, IDisposable
+    {
+        if (typeof(T) != typeof(IMidiInput) && typeof(T) != typeof(IMidiOutput))
         {
-            try
-            {
-                var port = await MidiAccess.OpenInputAsync(details.Id);
-                var status = port.Connection switch
-                {
-                    MidiPortConnectionState.Open => PortOpenStatus.Success,
-                    MidiPortConnectionState.Pending => PortOpenStatus.OpenPending,
-                    _ => PortOpenStatus.OpenFailed
-                };
-
-                return new PortOpenResult<IMidiInput>(status, port, details);
-            }
-            catch (Exception e)
-            {
-                return new PortOpenResult<IMidiInput>(PortOpenStatus.OpenFailed, null, details);
-            }
+            throw new ArgumentException(
+                $"Type provided ({typeof(T)}) must be either {typeof(IMidiInput)} or {typeof(IMidiOutput)}");
         }
+    }
 
-        static async Task<PortOpenResult<IMidiOutput>> TryOpenOutput(IMidiPortDetails details)
+
+    private static async Task<Result<T>> TryOpenPort<T>(IMidiPortDetails details) where T : IMidiPort, IDisposable
+    {
+        AssertPortType<T>();
+        try
         {
-            try
+            IMidiPort port = typeof(T) == typeof(IMidiInput)
+                ? await MidiAccess.OpenInputAsync(details.Id)
+                : await MidiAccess.OpenOutputAsync(details.Id);
+            var status = port.Connection switch
             {
-                var port = await MidiAccess.OpenOutputAsync(details.Id);
-                var status = port.Connection switch
-                {
-                    MidiPortConnectionState.Open => PortOpenStatus.Success,
-                    MidiPortConnectionState.Pending => PortOpenStatus.OpenPending,
-                    _ => PortOpenStatus.OpenFailed
-                };
+                MidiPortConnectionState.Open => PortOpenStatus.Success,
+                MidiPortConnectionState.Pending => PortOpenStatus.OpenPending,
+                _ => PortOpenStatus.OpenFailed
+            };
 
-                return new PortOpenResult<IMidiOutput>(status, port, details);
-            }
-            catch (Exception e)
-            {
-                return new PortOpenResult<IMidiOutput>(PortOpenStatus.OpenFailed, null, details);
-            }
+            return new Result<T>((T)port, true, null);
+        }
+        catch (Exception e)
+        {
+            return new Result<T>(default, false, e.ToString());
         }
     }
 
@@ -221,6 +224,8 @@ public static partial class DeviceHandler
         }
     }
 
-
     private static bool Has(this SearchMode searchMode, SearchMode flag) => (searchMode & flag) != 0;
+
+    private const SearchMode DefaultSearchMode =
+        SearchMode.UseDeviceName | SearchMode.Contains | SearchMode.CaseInsensitive;
 }

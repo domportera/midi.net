@@ -11,7 +11,8 @@ public interface ILEDGrid
 
 public interface IGridController
 {
-    void Initialize(int width, int height);
+    public int Width { get; }
+    public int Height { get; }
     bool TryParseMidiEvent(MidiEvent midiEvent, out PadStatusEvent? padStatusEvent, [NotNullWhen(false)] out string? reason);
 }
 
