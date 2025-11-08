@@ -28,45 +28,45 @@ public static partial class DeviceHandler
         where T : class, IMidiDevice, new()
     {
         deviceSearchTerm ??= typeof(T).Name;
-        var input = await TryOpenInput(deviceSearchTerm, searchMode);
         var output = await TryOpenOutput(deviceSearchTerm, searchMode);
+        var input = await TryOpenInput(deviceSearchTerm, searchMode);
 
-        if (!input.Success || !output.Success)
+        if (input.Success && output.Success)
         {
-            if (input.Success)
+            var device = new T
             {
-                input.Value?.Dispose();
+                MidiDevice = new MidiDevice
+                {
+                    Input = input.Value!,
+                    Output = output.Value!
+                }
+            };
+
+            try
+            {
+                await device.OnConnect();
+            }
+            catch (Exception ex)
+            {
+                await device.CloseAsync();
+                return new Result<T>(null, false, $"Failure in post-connection method: {ex}");
             }
 
-            if (output.Success)
-            {
-                output.Value?.Dispose();
-            }
+            device.MidiDevice.Reconnected += (_, _) => _ = device.OnConnect();
+            return new Result<T>(device, true, null);
+        }
+
+        if (input.Success)
+        {
+            input.Value?.Dispose();
+        }
+
+        if (output.Success)
+        {
+            output.Value?.Dispose();
+        }
             
-            return new Result<T>(null, false, $"Input: {input.Message}\n\nOutput: {output.Message}");
-        }
-        
-        var device = new T
-        {
-            MidiDevice = new MidiDevice
-            {
-                Input = input.Value!,
-                Output = output.Value!
-            }
-        };
-
-        try
-        {
-            await device.OnConnect();
-        }
-        catch (Exception ex)
-        {
-            await device.CloseAsync();
-            return new Result<T>(null, false, $"Failure in post-connection method: {ex}");
-        }
-
-        device.MidiDevice.Reconnected += (_,_) => _ = device.OnConnect();
-        return new Result<T>(device, true, null);
+        return new Result<T>(null, false, $"Input: {input.Message}\n\nOutput: {output.Message}");
     }
 
     public readonly record struct DeviceSearchTerm(string Term, SearchMode Flags);
@@ -108,17 +108,16 @@ public static partial class DeviceHandler
             break;
         }
 
-        if (deviceSearchTerm.Flags.Has(SearchMode.MatchAnyAsFallback))
+        if (midiInput == NotFound<T>() && deviceSearchTerm.Flags.Has(SearchMode.MatchAnyAsFallback))
         {
             // we can use a fallback device
             // todo: heuristics on the "best" device to use
-            if (midiInput == NotFound<T>() && inputs.Length > 0)
+            if (inputs.Length > 0)
             {
                 var fallbackInput = inputs[0];
                 midiInput = await TryOpenPort<T>(fallbackInput);
             }
         }
-
 
         if (!midiInput.Success)
         {
@@ -148,12 +147,6 @@ public static partial class DeviceHandler
             IMidiPort port = typeof(T) == typeof(IMidiInput)
                 ? await MidiAccess.OpenInputAsync(details.Id)
                 : await MidiAccess.OpenOutputAsync(details.Id);
-            var status = port.Connection switch
-            {
-                MidiPortConnectionState.Open => PortOpenStatus.Success,
-                MidiPortConnectionState.Pending => PortOpenStatus.OpenPending,
-                _ => PortOpenStatus.OpenFailed
-            };
 
             return new Result<T>((T)port, true, null);
         }
