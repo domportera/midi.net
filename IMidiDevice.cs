@@ -11,15 +11,14 @@ public interface IMidiDevice
     
 }
 
-public readonly struct Result<T>
+public readonly record struct Result<T>
 {
-    // mark as not null when BaseResult == true
-    [MemberNotNullWhen(true, nameof(Success))]
     public T? Value { get; }
 
-    public readonly bool Success;
+    [MemberNotNullWhen(true, nameof(Value))]
+    [MemberNotNullWhen(false, nameof(Message))]
+    public bool Success { get; }
     
-    [MemberNotNullWhen(false, nameof(Success))]
     public string? Message { get; }
     
     
@@ -39,7 +38,6 @@ public readonly struct Result<T>
         }
     }
     
-    public static implicit operator bool(Result<T> result) => result.Success;
     public static implicit operator Result(Result<T> result) => new(result.Success, result.Message);
 }
 

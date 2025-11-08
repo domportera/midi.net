@@ -112,7 +112,7 @@ public static partial class DeviceHandler
         {
             // we can use a fallback device
             // todo: heuristics on the "best" device to use
-            if (midiInput == NotFound<IMidiInput>() && inputs.Length > 0)
+            if (midiInput == NotFound<T>() && inputs.Length > 0)
             {
                 var fallbackInput = inputs[0];
                 midiInput = await TryOpenPort<T>(fallbackInput);
