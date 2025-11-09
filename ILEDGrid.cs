@@ -9,10 +9,8 @@ public interface ILEDGrid
     public void PushLEDs();
 }
 
-public interface IGridController
+public interface IMidiGrid
 {
-    public int Width { get; }
-    public int Height { get; }
     bool TryParseMidiEvent(MidiEvent midiEvent, out PadStatusEvent? padStatusEvent, [NotNullWhen(false)] out string? reason);
 }
 

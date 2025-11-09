@@ -9,53 +9,53 @@ public partial class MidiDevice
 {
     public bool IsConnected => Input.Connection == MidiPortConnectionState.Open &&
                                Output.Connection == MidiPortConnectionState.Open;
-    
+
     public string Name => Input.Details.Name;
-    
+
     public bool IsDisposed { get; private set; }
-    public event EventHandler<ReadOnlyMemory<MidiEvent>>? MidiReceived;
-    public ConnectionState ConnectionState => (ConnectionState)_input.Connection;
+    public ConnectionState ConnectionState => (ConnectionState)Math.Max((int)Input.Connection, (int)Output.Connection);
+
+    public IMidiInput Input => _input;
+
+    public IMidiOutput Output => _output;
     
-
-    public event EventHandler<MidiDevice>? Reconnected
+    public void PushMidi()
     {
-        add
+        MidiDevice.Buffer buffer;
+        lock (_bufferLock)
         {
-            if (value != null) _onReconnectSubscriptions.Add(value);
+            buffer = _midiSendBuffer;
+            _midiSendBuffer = default; // consume the buffer
         }
 
-        remove
+        if (buffer == default)
+            return; // nothing to send
+
+        if (buffer.Position == 0)
         {
-            if (value != null) _onReconnectSubscriptions.Remove(value);
+            ReturnBufferToPool(ref buffer);
+            return;
         }
-    }
-    
-    public required IMidiInput Input
-    {
-        get => _input!;
-        init
+
+        lock (_sendQueueLock)
         {
-            _input = value;
-            _input.MessageReceived += OnMessageReceived;
+            _sendQueue.Enqueue(buffer);
         }
+
+        _midiSendEvent.Set();
     }
 
-    public required IMidiOutput Output
-    {
-        get => _output!;
-        init => _output = value;
-    }
 
     public bool PushMidiImmediately()
     {
-        Buffer buffer;
+        MidiDevice.Buffer buffer;
         lock (_sendQueueLock)
         {
             if (!_sendQueue.TryDequeue(out buffer))
                 return true;
         }
 
-        if (_output.Connection != MidiPortConnectionState.Open)
+        if (Output.Connection != MidiPortConnectionState.Open)
         {
             // todo - do we need options for discarding vs preserving?
             ReturnBufferToPool(ref buffer);
@@ -66,7 +66,7 @@ public partial class MidiDevice
         {
             lock (_sendLock) // one at a time pls
             {
-                _output.Send(buffer.Data, 0, buffer.Position, 0);
+                Output.Send(buffer.Data, 0, buffer.Position, 0);
             }
 
             ReturnBufferToPool(ref buffer);
@@ -110,5 +110,11 @@ public partial class MidiDevice
             new ControlChangeMessage(ControlChange.DataEntryMsb, valueMsb),
             new ControlChangeMessage(ControlChange.DataEntryLsb, valueLsb)
         );
+    }
+
+    public void BeginConnect()
+    {
+        _input.BeginConnect();
+        _output.BeginConnect();
     }
 }

@@ -1,3 +1,4 @@
+#undef DEBUG_DEVICE_NAMES
 using System.Text;
 using Commons.Music.Midi;
 using Commons.Music.Midi.Alsa;
@@ -18,6 +19,7 @@ public static partial class DeviceHandler
         private readonly IMidiAccess _access;
 #pragma warning restore CS0618 // Type or member is obsolete
         private readonly MidiAccessExtensionManager? _extensionManager;
+
         // ReSharper disable once NotAccessedField.Local
         private readonly MidiPortCreatorExtension? _portCreatorExtension;
 
@@ -75,8 +77,11 @@ public static partial class DeviceHandler
         {
             get
             {
-                var sb = new StringBuilder();
+#if !DEBUG_DEVICE_NAMES
+                return _access.Inputs;
+#else
                 var inputs = _access.Inputs.ToArray();
+                var sb = new StringBuilder();
                 foreach (var input in inputs)
                 {
                     sb.Append("Found input device: ");
@@ -88,6 +93,7 @@ public static partial class DeviceHandler
                 {
                     yield return input;
                 }
+#endif
             }
         }
 
@@ -95,6 +101,9 @@ public static partial class DeviceHandler
         {
             get
             {
+#if !DEBUG_DEVICE_NAMES
+                return _access.Outputs;
+#else
                 var sb = new StringBuilder();
                 var outputs = _access.Outputs.ToArray();
                 foreach (var output in outputs)
@@ -104,11 +113,11 @@ public static partial class DeviceHandler
                     Console.WriteLine(sb.ToString());
                     sb.Clear();
                 }
-                
                 foreach(var output in outputs)
                 {
                     yield return output;
                 }
+#endif
             }
         }
 

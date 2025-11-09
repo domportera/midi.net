@@ -5,15 +5,33 @@ using MidiEvent = Midi.Net.MidiUtilityStructs.MidiEvent;
 
 namespace Midi.Net;
 
+public delegate ValueTask AsyncEventHandler<in T>(object? sender, T e);
+
 // todo: seal this class, have a separate interface for device-specific functionality
+
 public sealed partial class MidiDevice : IMidiInput, IMidiOutput, IAsyncDisposable
 {
     private readonly AutoResetEvent _midiSendEvent = new(false);
     private readonly CancellationTokenSource _cancellationTokenSource = new();
-    
-    public MidiDevice()
+    private bool _inputConnected, _outputConnected;
+    public event AsyncEventHandler<bool>? ConnectionStateChanged;
+
+    private readonly MidiInputSlot _input;
+    private readonly MidiOutputSlot _output;
+    private readonly Lock _connectionStateLock = new();
+
+    public MidiDevice(IMidiAccess2 access, DeviceHandler.DeviceSearchTerm inputTerm,
+        DeviceHandler.DeviceSearchTerm outputTerm)
     {
-        var args = new SendThreadArgs
+        var input = new MidiInputSlot(inputTerm, access);
+        var output = new MidiOutputSlot(outputTerm, access);
+        _input = input;
+        _output = output;
+
+        input.ConnectionStateChanged += OnSlotStateChanged;
+        output.ConnectionStateChanged += OnSlotStateChanged;
+
+        var args = new MidiDevice.SendThreadArgs
         {
             AutoResetEvent = _midiSendEvent,
             CancellationToken = _cancellationTokenSource.Token
@@ -26,6 +44,49 @@ public sealed partial class MidiDevice : IMidiInput, IMidiOutput, IAsyncDisposab
         };
         thread.Start(args);
     }
+
+    public async Task<Result> CloseAsync()
+    {
+        var inputClose = _input.CloseAsync();
+        var outputClose = _output.CloseAsync();
+        await Task.WhenAll(inputClose, outputClose);
+        return ResultFactory.From(success: Input.Connection == MidiPortConnectionState.Closed &&
+                                           Output.Connection == MidiPortConnectionState.Closed,
+            messageIfFailed: "Failed to close MIDI device");
+    }
+
+    private async ValueTask OnSlotStateChanged(object? sender, bool e)
+    {
+        _connectionStateLock.Enter();
+        var wasConnected = _inputConnected && _outputConnected;
+        if (sender == Input)
+        {
+            _inputConnected = e;
+        }
+        else
+        {
+            _outputConnected = e;
+        }
+
+        var isConnected = _inputConnected && _outputConnected;
+        _connectionStateLock.Exit();
+        if (wasConnected != isConnected)
+        {
+            Console.WriteLine("Connection state changed: " + isConnected);
+            try
+            {
+                if (ConnectionStateChanged != null)
+                {
+                    await ConnectionStateChanged.Invoke(this, isConnected);
+                }
+            }
+            catch (Exception ex)
+            {
+                await Console.Error.WriteLineAsync($"Error in {nameof(OnSlotStateChanged)}: {ex}");
+            }
+        }
+    }
+
 
     private class SendThreadArgs
     {
@@ -52,61 +113,15 @@ public sealed partial class MidiDevice : IMidiInput, IMidiOutput, IAsyncDisposab
             if (signaledIndex == 1) // cancellation requested
                 break;
 
-            if(!PushMidiImmediately())
+            if (!PushMidiImmediately())
             {
-                Reconnect();
             }
         }
     }
 
-    private void Reconnect()
-    {
-        var wasAlreadyReconnecting = Interlocked.Exchange(ref _isReconnecting, true);
-        if (wasAlreadyReconnecting)
-            return;
-        
-        var token = _cancellationTokenSource.Token;
-
-        // strategy #1 - let's see if this works
-        // all we do is wait for the backend to mark their connection state as open again
-        // if this doesn't work, we'll need to actually reconnect manually by disposing our input and output objects
-        // and creating new ones
-        // ReSharper disable once MethodSupportsCancellation
-        Task.Run(async () =>
-        {
-            try
-            {
-                while (!token.IsCancellationRequested &&
-                       _input.Connection != MidiPortConnectionState.Open &&
-                       _output.Connection != MidiPortConnectionState.Open)
-                {
-                    // wait for the device to be ready
-                    await Task.Delay(1000, token).ConfigureAwait(false);
-                }
-
-                if (!token.IsCancellationRequested &&
-                    _input.Connection == MidiPortConnectionState.Open &&
-                    _output.Connection == MidiPortConnectionState.Open)
-                {
-                    ForwardEvent(this, this, _onReconnectSubscriptions);
-                }
-
-            }
-            catch (Exception ex)
-            {
-                await Console.Error.WriteLineAsync(ex.ToString());
-            }
-            
-            _isReconnecting = false;
-        });
-    }
-
-    private bool _isReconnecting;
-    private readonly object _sendLock = new();
-   
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void AppendMidiEvent(in MidiEvent evt, ref Buffer buffer)
+    private static void AppendMidiEvent(in MidiEvent evt, ref MidiDevice.Buffer buffer)
     {
         try
         {
@@ -134,14 +149,14 @@ public sealed partial class MidiDevice : IMidiInput, IMidiOutput, IAsyncDisposab
         }
     }
 
-    private ref Buffer GetBuffer()
+    private ref MidiDevice.Buffer GetBuffer()
     {
         if (_midiSendBuffer != default)
         {
             return ref _midiSendBuffer;
         }
 
-        Buffer buffer;
+        MidiDevice.Buffer buffer;
         lock (_bufferPoolLock)
         {
             _midiBufferPool.TryPop(out buffer);
@@ -149,7 +164,7 @@ public sealed partial class MidiDevice : IMidiInput, IMidiOutput, IAsyncDisposab
 
         if (buffer == default)
         {
-            buffer = new Buffer
+            buffer = new MidiDevice.Buffer
             {
                 Data = new byte[BufferSize],
                 Position = 0
@@ -160,33 +175,7 @@ public sealed partial class MidiDevice : IMidiInput, IMidiOutput, IAsyncDisposab
         return ref _midiSendBuffer;
     }
 
-    public void PushMidi()
-    {
-        Buffer buffer;
-        lock (_bufferLock)
-        {
-            buffer = _midiSendBuffer;
-            _midiSendBuffer = default; // consume the buffer
-        }
-
-        if (buffer == default)
-            return; // nothing to send
-
-        if (buffer.Position == 0)
-        {
-            ReturnBufferToPool(ref buffer);
-            return;
-        }
-
-        lock (_sendQueueLock)
-        {
-            _sendQueue.Enqueue(buffer);
-        }
-
-        _midiSendEvent.Set();
-    }
-
-    private void ReturnBufferToPool(ref Buffer buff)
+    private void ReturnBufferToPool(ref MidiDevice.Buffer buff)
     {
         lock (_bufferPoolLock)
         {
@@ -194,12 +183,8 @@ public sealed partial class MidiDevice : IMidiInput, IMidiOutput, IAsyncDisposab
             _midiBufferPool.Push(buff); // return to pool
         }
     }
-    
 
-    private MidiStatus? _inputStatus;
-    private readonly IMidiInput _input;
-    private readonly IMidiOutput _output;
-
+    private readonly Lock _sendLock = new();
     private readonly Lock _bufferLock = new();
     private readonly Lock _bufferPoolLock = new();
     private Buffer _midiSendBuffer;
@@ -208,23 +193,25 @@ public sealed partial class MidiDevice : IMidiInput, IMidiOutput, IAsyncDisposab
     private readonly Lock _sendQueueLock = new();
     private readonly Queue<Buffer> _sendQueue = new();
 
-    private struct Buffer : IEquatable<Buffer>
+    private struct Buffer : IEquatable<MidiDevice.Buffer>
     {
         public required byte[] Data { get; init; }
         public int Position;
 
         // equality ops
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool operator ==(Buffer left, Buffer right) => ReferenceEquals(left.Data, right.Data);
+        public static bool operator ==(MidiDevice.Buffer left, MidiDevice.Buffer right) =>
+            ReferenceEquals(left.Data, right.Data);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool operator !=(Buffer left, Buffer right) => !ReferenceEquals(left.Data, right.Data);
+        public static bool operator !=(MidiDevice.Buffer left, MidiDevice.Buffer right) =>
+            !ReferenceEquals(left.Data, right.Data);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool Equals(Buffer other) => ReferenceEquals(Data, other.Data);
+        public bool Equals(MidiDevice.Buffer other) => ReferenceEquals(Data, other.Data);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public override bool Equals(object? obj) => obj is Buffer other && ReferenceEquals(Data, other.Data);
+        public override bool Equals(object? obj) => obj is MidiDevice.Buffer other && ReferenceEquals(Data, other.Data);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override int GetHashCode() => Data.GetHashCode();
